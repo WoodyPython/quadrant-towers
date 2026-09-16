@@ -21,6 +21,26 @@ const environmentSchema = z.object({
     .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
     .default('info'),
   BUILD_ID: z.string().trim().min(1).max(128).default('local'),
+  ALLOWED_ORIGINS: z
+    .string()
+    .default(
+      'http://127.0.0.1:3000,http://localhost:3000,http://127.0.0.1:5173,http://localhost:5173',
+    )
+    .transform((s) => s.split(',').map((s) => s.trim()))
+    .pipe(
+      z
+        .array(
+          z.url().refine((s) => {
+            try {
+              const u = new URL(s);
+              return ['http:', 'https:'].includes(u.protocol) && u.origin === s;
+            } catch {
+              return false;
+            }
+          }),
+        )
+        .min(1),
+    ),
 });
 
 export function parseEnvironment(input: Record<string, unknown>) {

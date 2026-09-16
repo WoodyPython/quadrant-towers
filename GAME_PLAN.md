@@ -375,7 +375,9 @@ Use HTTP only for service/bootstrap operations:
 
 Use acknowledged Socket.IO events for gameplay:
 
-- Client → server: `room:create`, `room:join`, `room:leave`, `match:start`, `card:choose`, `card:target`, `action:submit`, `turn:sync`, `rematch:vote`.
+- Client → server: `room:create`, `room:join`, `room:rejoin`, `room:leave`, `room:remove`, `match:start`, `card:choose`, `action:submit`, `turn:end`, `turn:sync`, `rematch:vote`.
+- `card:choose` includes all required targets and resolves atomically. There is no separate partially saved targeting step. `turn:end` explicitly ends the turn after both actions resolve.
+- Gameplay mutations include a UUID `commandId`, `matchId`, and `expectedVersion`. Start and rematch voting also use durable command receipts. Identity comes from the socket's authenticated seat, never a supplied actor field.
 - Server → client: `room:view`, `match:view`, `command:accepted`, `command:rejected`, `turn:timer`, `match:finished`, `server:error`.
 - Every emitted match view contains `matchId`, monotonically increasing `version`, and only that recipient's authorized information.
 - A player's three-card offer and any owner-only passive are included only in that player's projection; chosen public cards and triggered public effects are broadcast normally.
@@ -389,6 +391,9 @@ Use acknowledged Socket.IO events for gameplay:
 - `matches`: status, seed, board preset/config, pinned card catalog and balance versions, turn order, round/turn state, version, result, timestamps.
 - `match_snapshots`: match ID, version, complete private server state as JSONB, created timestamp.
 - `match_commands`: match ID, version, actor, type, validated payload JSONB, idempotency key, created timestamp.
+- `command_receipts`: room, actor, command ID, canonical request fingerprint, and original acceptance response for durable retries, including start and rematch voting.
+
+The command history starts with the complete server-only match-creation input at version zero so the latest snapshot can be independently reproduced by replay. See `docs/milestone-2.md` for the implemented transport and recovery contract.
 
 Keep only the latest snapshot plus command history during development. Before public launch, add a retention job: delete abandoned lobbies after 24 hours and completed match data after 30 days unless product requirements change.
 
@@ -591,6 +596,10 @@ Do not collect raw rejoin tokens, hidden board snapshots, or unnecessary persona
 
 | Date | Decision |
 |---|---|
+| 2026-09-15 | Milestone 2 resolves card choice and targets atomically, adds explicit turn-end/rejoin/seat-removal events, and persists start/rematch command receipts. |
+| 2026-09-15 | Lobby host ownership transfers to the earliest-joined connected player on explicit departure or after two disconnected minutes; if nobody is connected, transfer occurs on the next eligible reconnect. |
+| 2026-09-15 | All four original players must vote and be connected for a rematch; seats and preset persist while setup randomness is refreshed. |
+| 2026-09-15 | Recovery resolves one overdue turn at recovery time and gives the next player a fresh 90 seconds. One controlling socket is allowed per seat. |
 | 2026-09-15 | MVP is exactly four human players; the host chooses Small (6×6 quadrants), Medium (8×8), Large (10×10), or Massive (14×14) when creating the room. |
 | 2026-09-15 | Size presets use 10, 12, 16, and 22 rounds respectively; a match still ends early when only one player remains. |
 | 2026-09-15 | Each turn privately offers three distinct randomized Ability Cards; the player must choose one before taking exactly two actions, and action types may repeat. |

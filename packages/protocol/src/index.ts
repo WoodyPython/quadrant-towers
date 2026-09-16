@@ -1,4 +1,5 @@
 import { z } from 'zod';
+export * from './multiplayer.js';
 
 export const PROTOCOL_VERSION = 1;
 export const versionSchema = z.object({

@@ -8,6 +8,13 @@
       "when": 1789520226040,
       "tag": "0000_broken_malice",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1789523593093,
+      "tag": "0001_closed_prism",
+      "breakpoints": true
     }
   ]
 }

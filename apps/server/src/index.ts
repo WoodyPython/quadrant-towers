@@ -2,6 +2,8 @@ import { fileURLToPath } from 'node:url';
 import { buildApp } from './app.js';
 import { createDatabase } from './db/database.js';
 import { parseEnvironment } from './env.js';
+import { defaultRegistry } from '@quadrant/game-engine';
+import { Store } from './multiplayer/store.js';
 
 async function main() {
   const environment = parseEnvironment(process.env);
@@ -10,6 +12,7 @@ async function main() {
     environment,
     ready: database.ready,
     closeDatabase: database.close,
+    store: new Store(database.pool, defaultRegistry),
     ...(environment.NODE_ENV === 'production'
       ? {
           staticRoot: fileURLToPath(

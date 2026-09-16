@@ -21,6 +21,9 @@ describe('environment validation', () => {
     { LOG_LEVEL: 'verbose' },
     { HOST: '' },
     { BUILD_ID: '' },
+    { ALLOWED_ORIGINS: '*' },
+    { ALLOWED_ORIGINS: 'https://example.com/path' },
+    { ALLOWED_ORIGINS: 'https://example.com,' },
   ])('rejects invalid configuration %j', (invalid) => {
     expect(() => parseEnvironment({ ...base, ...invalid })).toThrow(
       'Invalid environment variables',

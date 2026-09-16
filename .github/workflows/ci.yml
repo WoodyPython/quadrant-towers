@@ -1,4 +1,4 @@
-name: Foundation checks
+name: Project checks
 on:
   pull_request:
   push:

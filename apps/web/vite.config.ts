@@ -18,7 +18,11 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 5173,
       strictPort: true,
-      proxy: { '/api': target, '/health': target },
+      proxy: {
+        '/api': target,
+        '/health': target,
+        '/socket.io': { target, ws: true },
+      },
     },
   };
 });
