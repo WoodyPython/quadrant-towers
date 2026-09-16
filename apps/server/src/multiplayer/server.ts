@@ -923,7 +923,12 @@ export class Multiplayer {
           write: {
             command: {
               actorId: null,
-              commandId: `timeout:${state.turn.number}`,
+              // Placement has no turn number to key on: each player only ever
+              // times out placement once, so their id is a unique key there.
+              commandId:
+                state.phase === 'placement'
+                  ? `timeout:placement:${state.turn.playerId}`
+                  : `timeout:${state.turn.number}`,
               payload: { type: 'timeout' } as Command,
             },
           },

@@ -261,7 +261,8 @@ it('starts with two connected players and closes empty seats to later joins', as
   success(await request(host, 'match:start', { commandId: randomUUID() }));
   const match = await state(created.room!.id);
   expect(match.players).toHaveLength(2);
-  expect(match.towers).toHaveLength(2);
+  expect(match.phase).toBe('placement');
+  expect(match.towers).toHaveLength(0);
   expect(
     await request(await connect(), 'room:join', {
       code: created.room!.code,
@@ -1017,7 +1018,7 @@ it('limits socket work before persistence, refills, and allows four players behi
         'SELECT count(*)::int AS n FROM command_receipts',
       )
     ).rows[0].n,
-  ).toBe(1);
+  ).toBe(identities.length + 1);
 });
 
 it('expires only disconnected lobbies at the 24-hour boundary', async () => {
