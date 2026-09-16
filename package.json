@@ -1,0 +1,43 @@
+{
+  "name": "quadrant-towers",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.32.1",
+  "engines": {
+    "node": "24.21.0"
+  },
+  "scripts": {
+    "dev": "corepack pnpm build:packages && concurrently -k -n server,web \"corepack pnpm --filter @quadrant/server dev\" \"corepack pnpm --filter @quadrant/web dev\"",
+    "build:packages": "corepack pnpm --filter @quadrant/protocol --filter @quadrant/game-engine build",
+    "build": "corepack pnpm build:packages && corepack pnpm --filter @quadrant/server build && corepack pnpm --filter @quadrant/web build",
+    "start": "node --env-file=.env apps/server/dist/index.js",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "typecheck": "corepack pnpm build:packages && corepack pnpm -r --if-present typecheck && tsc --noEmit",
+    "test": "vitest run",
+    "test:integration": "node --env-file=.env node_modules/vitest/vitest.mjs run --config vitest.integration.config.ts",
+    "test:e2e": "node --env-file=.env node_modules/@playwright/test/cli.js test",
+    "db:generate": "drizzle-kit generate",
+    "db:check": "drizzle-kit check",
+    "db:migrate": "node --env-file=.env --import tsx apps/server/src/db/migrate.ts",
+    "db:up": "docker compose up -d --wait",
+    "db:down": "docker compose down",
+    "local": "node scripts/local.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "@playwright/test": "^1.58.2",
+    "@types/node": "^24.10.0",
+    "concurrently": "^9.2.1",
+    "drizzle-kit": "^0.31.9",
+    "eslint": "^9.39.0",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.4.0",
+    "prettier": "^3.8.1",
+    "tsx": "^4.21.0",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.56.0",
+    "vitest": "^4.0.18"
+  }
+}

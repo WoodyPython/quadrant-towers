@@ -1,0 +1,9 @@
+{
+  "name": "@quadrant/config",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./eslint": "./eslint.js",
+    "./tsconfig": "./tsconfig.json"
+  }
+}

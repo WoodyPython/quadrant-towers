@@ -1,0 +1,93 @@
+:root {
+  font-family: system-ui, sans-serif;
+  color: #eef2fa;
+  background: #101827;
+  font-synthesis: none;
+  line-height: 1.6;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+.shell {
+  min-height: 100svh;
+  max-width: 760px;
+  margin: auto;
+  padding: 80px 24px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.emblem {
+  display: grid;
+  grid-template-columns: repeat(2, 36px);
+  gap: 6px;
+  transform: rotate(-8deg);
+  margin-bottom: 28px;
+}
+.emblem span {
+  height: 36px;
+  border-radius: 6px;
+  background: #7dd3fc;
+}
+.emblem span:nth-child(2) {
+  background: #c4b5fd;
+}
+.emblem span:nth-child(3) {
+  background: #fcd34d;
+}
+.emblem span:nth-child(4) {
+  background: #6ee7b7;
+}
+.eyebrow {
+  color: #7dd3fc;
+  font-size: 0.85rem;
+  letter-spacing: 0.06em;
+}
+h1 {
+  font-size: clamp(2.4rem, 8vw, 4rem);
+  line-height: 1.1;
+  margin: 12px 0;
+}
+.description {
+  color: #cbd5e1;
+  max-width: 420px;
+}
+.status {
+  width: 100%;
+  max-width: 420px;
+  margin: 28px 0 8px;
+  padding: 20px;
+  border: 1px solid #42516a;
+  border-radius: 12px;
+  background: #192539;
+}
+.status p {
+  margin-top: 0;
+}
+button {
+  font: inherit;
+  font-weight: 600;
+  min-height: 44px;
+  padding: 8px 18px;
+  border: 0;
+  border-radius: 6px;
+  background: #7dd3fc;
+  color: #101827;
+  cursor: pointer;
+}
+button:hover {
+  background: #bae6fd;
+}
+button:focus-visible {
+  outline: 3px solid #fcd34d;
+  outline-offset: 4px;
+}
+.note {
+  color: #aebed1;
+  font-size: 0.85rem;
+}

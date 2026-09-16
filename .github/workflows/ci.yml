@@ -1,0 +1,47 @@
+name: Foundation checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17.6-alpine
+        env:
+          POSTGRES_USER: quadrant
+          POSTGRES_PASSWORD: quadrant_local
+          POSTGRES_DB: quadrant_towers
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U quadrant -d quadrant_towers"
+          --health-interval 2s --health-timeout 5s --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - run: corepack pnpm install --frozen-lockfile
+      - run: cp .env.example .env
+      - run: corepack pnpm format:check
+      - run: corepack pnpm lint
+      - run: corepack pnpm typecheck
+      - run: corepack pnpm test
+      - run: corepack pnpm test:integration
+      - run: corepack pnpm build
+      - run: corepack pnpm db:check
+      - run: corepack pnpm db:migrate
+      - run: corepack pnpm exec playwright install --with-deps chromium
+      - run: corepack pnpm test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-test-results
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
