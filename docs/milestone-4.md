@@ -6,7 +6,7 @@ The repository contains production hardening, retention, Docker/Railway configur
 
 Create project `quadrant-towers` in US West, with one app service and PostgreSQL in the same region. Railway's current template uses PostgreSQL 18; local development and CI use PostgreSQL 17. Use matching PostgreSQL client tools for backups. Use a generated HTTPS domain. Keep PostgreSQL private; enable its public TCP proxy only temporarily when needed for a local backup, then disable it. Do not add an app TCP proxy. Disable app sleeping and keep exactly one replica.
 
-Current budget constraint: remain on the free trial/free plan, with no paid upgrade or paid usage subscription. The account initially reported 30 trial days and $5 credits with no payment method. Do not enable paid billing when credits expire; availability is limited by the free allowance. Automatic deployment remains disabled until the scoped CI token is supplied.
+Current budget constraint: remain on the free trial/free plan, with no paid upgrade or paid usage subscription. The account initially reported 30 trial days and $5 credits with no payment method. Do not enable paid billing when credits expire; availability is limited by the free allowance. Automatic deployment is enabled and gated on successful checks; its Railway-issued project token must be valid.
 
 Set application variables:
 
@@ -25,9 +25,11 @@ Railway's HTTP edge supplies `X-Real-IP`; the app ignores `X-Forwarded-For`. Dir
 
 The Dockerfile pins the repository's Node version, builds all packages, and runs as a non-root user. `railway.json` runs compiled migrations before deployment, probes `/health/ready`, and allows 15 seconds for shutdown. The application caps graceful draining at 10 seconds. Production requires explicit HTTPS origins and enabled rate limits. Local `pnpm local` serves built assets using `SERVE_STATIC=true` without enabling production HTTPS requirements.
 
+Verify these settings on the Railway service itself. During initial provisioning, Railway detected the Dockerfile but did not apply the file's deploy settings. The pre-deploy migration, start command, readiness probe (120-second timeout), zero overlap, 15-second drain, five restart retries, and disabled sleeping were therefore also configured directly through the service API. Keep exactly one `sfo` region entry; adding an alias alongside it can request multiple regions and exceed the free plan's capabilities.
+
 ## GitHub releases
 
-Repository: `WoodyPython/quadrant-towers`. Protect `main` with the `check` job and required review as appropriate. **Disable Railway GitHub autodeploy**: even a single-replica service normally overlaps old and new processes during replacement. Zero overlap seconds does not by itself prevent startup overlap.
+Repository: `WoodyPython/quadrant-towers`. Branch protection requires the `check` job on `main` and blocks force pushes and branch deletion; administrators retain bypass access. Add required review as the team grows. **Disable Railway GitHub autodeploy**: even a single-replica service normally overlaps old and new processes during replacement. Zero overlap seconds does not by itself prevent startup overlap.
 
 Create a GitHub `production` environment. Add its secret `RAILWAY_TOKEN` using a Railway project/environment token, and variables `RAILWAY_SERVICE_ID`, `RAILWAY_ENVIRONMENT_ID`, and `PRODUCTION_ORIGIN`. Set repository variable `RAILWAY_DEPLOY_ENABLED=true` only after configuring them. Credentials never belong in the repo.
 
@@ -89,7 +91,16 @@ Railway currently warns that `railway.json` remains supported until December 1, 
 - Railway project: `61833875-69f0-4b10-b481-8567e1168c3c` (`quadrant-towers`).
 - Production environment: `dd8641fd-7696-4ad7-a474-f5641e0ba303`.
 - App: `be1c7f35-36c6-41c1-a427-d8cae922a5ac`; PostgreSQL: `0e8b8b3a-c162-492d-8b56-2737c5bac149`.
-- Reserved origin: `https://app-production-b10b2.up.railway.app`.
-- GitHub production environment and non-secret variables are configured. Deployment stays disabled until its `RAILWAY_TOKEN` secret exists.
-- Railway API returned `Not Authorized` for scoped project-token creation and daily backup scheduling. These are pending dashboard/account actions; no paid upgrade was enabled to bypass them.
+- Live origin: `https://app-production-b10b2.up.railway.app`.
+- GitHub production environment, variables, and `RAILWAY_TOKEN` secret are configured; `RAILWAY_DEPLOY_ENABLED=true`.
+- Railway API returned `Not Authorized` for scoped project-token creation and daily backup scheduling. The owner supplied the CI token through GitHub and confirmed that scheduled backups require a paid upgrade. Scheduled backups remain disabled to respect the free-only budget; this acceptance gate is unmet. No paid upgrade was enabled.
 - PostgreSQL has no public TCP proxy. The app uses its private database reference.
+
+## Deployment evidence — September 15, 2026 (Pacific)
+
+- Commit `0cc79c0ebf0373621d2b02774d5e08b52989c88f`: 119 unit tests, 22 integration tests, and 13 browser tests passed on GitHub's Linux runner. Formatting, lint, types, build, and schema checks passed. [GitHub workflow](https://github.com/WoodyPython/quadrant-towers/actions/runs/35053124660) completed both check and deployment jobs successfully after the owner supplied a Railway-issued project token.
+- Live HTTPS readiness returned 200, `/api/version` reported the checked SHA, and secure headers and static assets were present. Four independent browser contexts created and joined a real WebSocket match.
+- Controlled replacement: deployment `546f98c1-b32d-4498-8ebf-7dd065b3e8cd` reached `REMOVED` before replacement `975c70a0-778d-4b6b-a598-51e27451c47c` started. All four browsers automatically recovered unchanged seat identities, nondecreasing match versions, and schema-valid private projections without a page reload. Inactive players received no active player's card offer.
+- A burst of 150 requests with distinct forged `X-Real-IP` and `X-Forwarded-For` values produced 122 successful responses and 28 rate-limit responses; varying those headers did not bypass the shared client limit. Readiness remained 200.
+- The committed logical backup script exported and restored two local rooms into a disposable database and verified migration/snapshot integrity in 475 ms. The separate four-seat restoration/completion rehearsal is recorded above. Disposable local containers and databases were removed afterward.
+- Remaining acceptance gates: automated Railway backups (owner confirmed a paid upgrade is required), Railway volume restoration rehearsal, and three consecutive invited-player matches. No paid upgrade was made, and the milestone is not yet accepted.
