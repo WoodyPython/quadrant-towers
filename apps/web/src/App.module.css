@@ -301,18 +301,6 @@
   padding: 64px;
   text-align: center;
 }
-.saving {
-  position: fixed;
-  right: 16px;
-  bottom: calc(16px + env(safe-area-inset-bottom));
-  border-radius: 24px;
-  background: var(--ink);
-  color: white;
-  padding: 8px 16px;
-  font-size: 12px;
-  z-index: 5;
-  pointer-events: none;
-}
 .muted {
   color: var(--muted);
 }
@@ -428,6 +416,10 @@
   align-items: start;
 }
 .boardColumn {
+  min-width: 0;
+}
+.boardStage {
+  position: relative;
   min-width: 0;
 }
 .turnBar {
@@ -686,26 +678,64 @@
 }
 .cards {
   display: grid;
-  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.cardOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  border-radius: 12px;
+  background: #20291fa8;
+  backdrop-filter: blur(2px);
+  animation: fade-in 160ms ease-out;
+}
+.cardPicker {
+  width: min(760px, 100%);
+  max-height: calc(100% - 24px);
+  overflow: auto;
+  padding: 24px;
+  border: 1px solid #b8beaf;
+  border-radius: 16px;
+  background: var(--paper);
+  box-shadow: 0 20px 60px #151d1599;
+  animation: card-pop var(--move) ease-out;
+}
+.cardPicker h1 {
+  margin: 2px 0 6px;
+  font-size: 26px;
+  letter-spacing: -0.7px;
+}
+.cardPicker > p {
+  margin-bottom: 20px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.cardPromptLabel {
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 .card {
   text-align: left;
-  padding: 16px 12px;
+  min-height: 168px;
+  padding: 18px 14px;
   align-items: flex-start;
   justify-content: flex-start;
   gap: 12px;
-}
-.card[data-selected='true'] {
-  background: #e9efe4;
-  border-color: var(--green);
-  box-shadow: inset 0 0 0 1px var(--green);
 }
 .card > span:last-child {
   min-width: 0;
 }
 .card strong {
   display: block;
-  font-size: 14px;
+  font-size: 15px;
 }
 .cardIcon {
   color: var(--green);
@@ -727,15 +757,17 @@
 }
 .actions {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
 }
 .actions button {
   flex-direction: column;
-  padding: 12px 4px;
-  gap: 8px;
-  font-size: 12px;
-  min-height: 76px;
+  padding: 20px 10px;
+  gap: 12px;
+  min-height: 112px;
+  font-size: 15px;
+  font-weight: 650;
+  box-shadow: 0 2px 8px #26312612;
 }
 .actions button[aria-pressed='true'] {
   color: var(--green);
@@ -772,14 +804,12 @@
   background: #782f25;
   color: white;
 }
-.effects,
-.feed {
+.effects {
   border-top: 1px solid var(--line);
   padding-top: 16px;
   margin-top: 24px;
 }
-.effects summary,
-.feed summary {
+.effects summary {
   cursor: pointer;
   font-size: 13px;
   font-weight: 600;
@@ -799,31 +829,6 @@
   display: block;
   margin-top: 4px;
   color: var(--muted);
-}
-.feed ol {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  max-height: 240px;
-  overflow: auto;
-}
-.feed ol:focus-visible {
-  outline: 3px solid #1c7557;
-  outline-offset: 3px;
-}
-.feed li {
-  color: var(--muted);
-  font-size: 12px;
-  padding: 8px 0;
-  border-bottom: 1px solid #e4e5dc;
-  animation: arrive 180ms ease-out;
-}
-.feed li:first-child {
-  color: var(--ink);
-}
-.feed button {
-  margin-top: 8px;
-  font-size: 12px;
 }
 .results h1 {
   font-size: 26px;
@@ -969,6 +974,24 @@
     transform: translateY(0);
   }
 }
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes card-pop {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
 @media (min-width: 1500px) {
   .boardViewport {
     max-height: 760px;
@@ -1092,16 +1115,30 @@
     font-size: 18px;
   }
   .actions button {
-    min-height: 68px;
+    min-height: 88px;
   }
   .cards {
+    grid-template-columns: 1fr;
     gap: 8px;
   }
   .card {
+    min-height: 0;
     padding: 12px;
   }
-  .effects,
-  .feed {
+  .cardOverlay {
+    padding: 12px;
+  }
+  .cardPicker {
+    max-height: calc(100% - 12px);
+    padding: 16px;
+  }
+  .cardPicker h1 {
+    font-size: 21px;
+  }
+  .cardPicker > p {
+    margin-bottom: 12px;
+  }
+  .effects {
     margin-top: 16px;
   }
   .boardCaption {

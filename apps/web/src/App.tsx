@@ -111,10 +111,10 @@ function Help({ close }: { close: () => void }) {
         </p>
         <h3>Rejoining</h3>
         <p>
-          Refresh to return to your seat. The timer keeps running while
-          disconnected. On timeout, the server resolves a card and any remaining
-          actions. Use separate devices or browser profiles for different
-          players.
+          Refresh to return to your seat within one minute. After that you are
+          eliminated. Your turn timer keeps running while disconnected, and on
+          timeout the server resolves a card and any remaining actions. Use
+          separate devices or browser profiles for different players.
         </p>
         <h3>Board controls</h3>
         <p>
@@ -380,16 +380,8 @@ function Lobby() {
 }
 export default function App() {
   const [help, setHelp] = useState(location.pathname === '/help');
-  const {
-    connection,
-    error,
-    uncertain,
-    pending,
-    room,
-    match,
-    home,
-    storageWarning,
-  } = useGame();
+  const { connection, error, uncertain, room, match, home, storageWarning } =
+    useGame();
   useEffect(() => {
     connect();
     const pop = () => setHelp(location.pathname === '/help');
@@ -422,20 +414,14 @@ export default function App() {
           <Icon name="help" />
         </button>
       </header>
-      {connection !== 'online' && (
+      {['offline', 'replaced'].includes(connection) && (
         <div className={styles.connection} role="status">
           <span>
             {connection === 'replaced'
               ? 'This seat is open in another tab.'
-              : connection === 'offline'
-                ? 'Connection lost. Your turn timer keeps running.'
-                : connection === 'syncing'
-                  ? 'Restoring your game…'
-                  : 'Connecting…'}
+              : 'Connection lost. Rejoin within one minute to stay in the game.'}
           </span>
-          {['offline', 'replaced'].includes(connection) && (
-            <button onClick={reconnect}>Reconnect</button>
-          )}
+          <button onClick={reconnect}>Reconnect</button>
         </div>
       )}
       {error && (
@@ -474,11 +460,6 @@ export default function App() {
         <main id="main" className={styles.loading} role="status">
           Loading board…
         </main>
-      )}
-      {pending && !uncertain && (
-        <span className={styles.saving} role="status">
-          Saving…
-        </span>
       )}
       {help && <Help close={() => showHelp(false)} />}
     </>

@@ -119,11 +119,14 @@ test('two players can start while empty quadrants remain unavailable', async ({
       await expect(
         page.getByRole('region', { name: 'Game board' }),
       ).toBeVisible();
+      await expect(page.getByText('Moves', { exact: true })).toHaveCount(0);
       await expect(page.locator('[class*="closedQuadrant"]')).toHaveCount(2);
       await expect(
         page.locator('[data-cell][aria-disabled="true"]'),
       ).toHaveCount(72);
     }
+    const active = await activePage([host!, guest!]);
+    await expect(active.locator('[class*="cardOverlay"]')).toBeVisible();
   } finally {
     await Promise.all(contexts.map((context) => context.close()));
   }

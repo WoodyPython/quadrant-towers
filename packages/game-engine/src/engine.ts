@@ -402,6 +402,9 @@ function endTurn(state: MatchState, registry: EngineRegistry, now: number) {
   );
   expireEffects(state, registry, true);
   event(state, state.turn.playerId, 'turn_ended');
+  advanceTurn(state, registry, now);
+}
+function advanceTurn(state: MatchState, registry: EngineRegistry, now: number) {
   let index = state.turnOrder.indexOf(state.turn.playerId);
   do {
     index = (index + 1) % state.turnOrder.length;
@@ -503,7 +506,7 @@ export function createMatch(
   return state;
 }
 // Invalid transitions return the original object, including RNG, history and action budget.
-// Networking authenticates actorId and serializes commands; timeout is a server-only command.
+// Networking authenticates actorId and serializes commands; timeouts and forfeits are server-only.
 export function applyCommand(
   state: MatchState,
   actorId: string | null,
@@ -522,7 +525,20 @@ export function applyCommand(
     requireRule(command && typeof command === 'object', 'Invalid command');
     pinnedContent(state, registry);
     const next = clone(state);
-    if (command.type === 'timeout') {
+    if (command.type === 'forfeit') {
+      requireRule(actorId === null, 'Forfeit is server-only');
+      const player = playerById(next, command.playerId);
+      requireRule(!player.eliminated, 'Player is already eliminated');
+      next.towers = next.towers.filter(
+        (tower) => tower.ownerId !== command.playerId,
+      );
+      eliminate(next, registry);
+      if (!next.result && next.turn.playerId === player.id) {
+        expireEffects(next, registry, true);
+        event(next, player.id, 'turn_ended');
+        advanceTurn(next, registry, now);
+      }
+    } else if (command.type === 'timeout') {
       requireRule(actorId === null, 'Timeout is server-only');
       requireRule(now >= state.turn.deadline, 'Turn has not timed out');
       const player = playerById(next, next.turn.playerId);

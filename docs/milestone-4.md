@@ -47,7 +47,7 @@ Secure headers cover HTTP and Socket.IO. CSP permits same-origin scripts/connect
 
 An additive migration adds `rooms.inactive_since`, `matches.finished_at`, and `command_receipts.match_id`, backfilling durable timestamps and receipt associations. Cleanup runs after recovery and hourly, in batches of 100 rooms. It shares room queues and database row locks with gameplay.
 
-- Lobbies expire after 24 hours with no connected players. Rejoining clears inactivity; active matches never expire as abandoned lobbies.
+- Empty lobbies are deleted immediately after the last explicit departure. Rooms with no connected players are deleted after the one-minute reconnect grace period, including their active match state.
 - Completed matches, their private snapshots, commands, and associated receipts expire after 30 days. Expiring historical matches preserves newer rematches and their seats.
 - A room whose latest completed match expires is removed with its player identities. Connected clients receive `ROOM_NOT_FOUND` and clear their saved seat. Timers and in-memory room references are evicted.
 - Backups have independent retention: deleting live records does not rewrite older backup archives.

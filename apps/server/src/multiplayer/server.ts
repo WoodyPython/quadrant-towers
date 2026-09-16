@@ -81,6 +81,7 @@ const messages: Record<ErrorCode, string> = {
   SERVICE_UNAVAILABLE:
     'The service is temporarily unavailable. Retry or reconnect.',
 };
+const DISCONNECT_GRACE_MS = 60_000;
 function rejection(code: ErrorCode): Extract<Ack, { ok: false }> {
   return { ok: false, code, message: messages[code] };
 }
@@ -289,7 +290,9 @@ export class Multiplayer {
         const { aggregate } = await this.store.transaction(
           id,
           async ({ room }) => {
-            for (const p of room.players) p.disconnectedAt ??= this.clock.now();
+            // A service outage is not a player's fault; every seat receives a
+            // fresh reconnect grace period once the server is available again.
+            for (const p of room.players) p.disconnectedAt = this.clock.now();
             return { value: null, write: {} };
           },
         );
@@ -734,6 +737,10 @@ export class Multiplayer {
         if (event === 'room:leave') {
           this.connections.delete(socket.data.playerId!);
           socket.data = {};
+          if (aggregate.room.status === 'closed') {
+            await this.discard(roomId);
+            return value;
+          }
         }
         this.publish(aggregate);
         if (value.ok && value.commandId)
@@ -779,6 +786,18 @@ export class Multiplayer {
       rematchVote: null,
     };
   }
+  private async discard(roomId: string) {
+    const playerIds = await this.store.deleteRoom(roomId);
+    this.timers.get(roomId)?.();
+    this.timers.delete(roomId);
+    this.hot.delete(roomId);
+    for (const playerId of playerIds ?? []) {
+      const socket = this.connections.get(playerId);
+      socket?.emit('server:error', rejection('ROOM_NOT_FOUND'));
+      if (socket) socket.data = {};
+      this.connections.delete(playerId);
+    }
+  }
   private disconnected(socket: GameSocket) {
     const { playerId, roomId } = socket.data;
     if (!playerId || !roomId || this.connections.get(playerId) !== socket)
@@ -800,48 +819,118 @@ export class Multiplayer {
       })
       .catch(() => this.retry(roomId));
   }
-  private async expire(roomId: string) {
-    const { value: changed, aggregate } = await this.store.transaction(
-      roomId,
-      async (aggregate) => {
-        const { room, state } = aggregate;
-        // Repair presence after a transient database failure during disconnect.
-        let changed = false;
-        for (const p of room.players)
-          if (!this.connected(p.id) && p.disconnectedAt === null) {
-            p.disconnectedAt = this.clock.now();
-            changed = true;
-          }
-        const host = room.hostPlayerId;
-        this.transferHost(room);
-        changed ||= host !== room.hostPlayerId;
-        if (state && !state.result && this.clock.now() >= state.turn.deadline) {
+  private async expire(roomId: string): Promise<Aggregate | null> {
+    const { value, aggregate } = await this.store.transaction<
+      boolean | 'remove'
+    >(roomId, async (aggregate) => {
+      const { room, state } = aggregate;
+      // Repair presence after a transient database failure during disconnect.
+      let changed = false;
+      for (const p of room.players)
+        if (!this.connected(p.id) && p.disconnectedAt === null) {
+          p.disconnectedAt = this.clock.now();
+          changed = true;
+        }
+      const host = room.hostPlayerId;
+      this.transferHost(room);
+      changed ||= host !== room.hostPlayerId;
+      const activePlayers =
+        state?.players.filter((player) => !player.eliminated) ?? [];
+      const abandonedActiveMatch =
+        !!state &&
+        !state.result &&
+        activePlayers.length > 0 &&
+        activePlayers.every((player) => {
+          const seat = room.players.find((entry) => entry.id === player.id);
+          return (
+            !this.connected(player.id) &&
+            seat?.disconnectedAt !== null &&
+            seat?.disconnectedAt !== undefined &&
+            seat.disconnectedAt + DISCONNECT_GRACE_MS <= this.clock.now()
+          );
+        });
+      const abandonedRoom =
+        room.players.length > 0 &&
+        room.players.every(
+          (player) =>
+            !this.connected(player.id) &&
+            player.disconnectedAt !== null &&
+            player.disconnectedAt + DISCONNECT_GRACE_MS <= this.clock.now(),
+        );
+      if (
+        (room.status === 'closed' && room.players.length === 0) ||
+        abandonedActiveMatch ||
+        (state?.result && abandonedRoom) ||
+        (!state && abandonedRoom)
+      )
+        return { value: 'remove' };
+      if (state && !state.result) {
+        const expired = activePlayers.find((player) => {
+          const seat = room.players.find((entry) => entry.id === player.id);
+          return (
+            !this.connected(player.id) &&
+            seat?.disconnectedAt !== null &&
+            seat?.disconnectedAt !== undefined &&
+            seat.disconnectedAt + DISCONNECT_GRACE_MS <= this.clock.now()
+          );
+        });
+        if (
+          expired &&
+          activePlayers.some((player) => this.connected(player.id))
+        ) {
           const next = applyCommand(
             state,
             null,
-            { type: 'timeout' },
+            { type: 'forfeit', playerId: expired.id },
             Math.max(this.clock.now(), state.lastCommandAt),
             this.registry,
           );
-          if (!next.ok) throw new Error('Timeout failed');
+          if (!next.ok) throw new Error('Forfeit failed');
           aggregate.state = next.state;
           if (next.state.result) room.status = 'finished';
+          const seat = room.players.find((player) => player.id === expired.id)!;
           return {
             value: true,
             write: {
               command: {
                 actorId: null,
-                commandId: `timeout:${state.turn.number}`,
-                payload: { type: 'timeout' } as Command,
+                commandId: `forfeit:${expired.id}:${seat.disconnectedAt}`,
+                payload: { type: 'forfeit', playerId: expired.id },
               },
             },
           };
         }
-        return { value: changed, ...(changed ? { write: {} } : {}) };
-      },
-    );
+      }
+      if (state && !state.result && this.clock.now() >= state.turn.deadline) {
+        const next = applyCommand(
+          state,
+          null,
+          { type: 'timeout' },
+          Math.max(this.clock.now(), state.lastCommandAt),
+          this.registry,
+        );
+        if (!next.ok) throw new Error('Timeout failed');
+        aggregate.state = next.state;
+        if (next.state.result) room.status = 'finished';
+        return {
+          value: true,
+          write: {
+            command: {
+              actorId: null,
+              commandId: `timeout:${state.turn.number}`,
+              payload: { type: 'timeout' } as Command,
+            },
+          },
+        };
+      }
+      return { value: changed, ...(changed ? { write: {} } : {}) };
+    });
+    if (value === 'remove') {
+      await this.discard(roomId);
+      return null;
+    }
     this.hot.set(roomId, aggregate);
-    if (changed && this.recovered) this.publish(aggregate);
+    if (value && this.recovered) this.publish(aggregate);
     return aggregate;
   }
   private retry(roomId: string) {
@@ -857,7 +946,7 @@ export class Multiplayer {
     void this.queues
       .run(`room:${roomId}`, async () => {
         const aggregate = await this.expire(roomId);
-        this.arm(aggregate);
+        if (aggregate) this.arm(aggregate);
       })
       .catch(() => this.retry(roomId));
   }
@@ -865,9 +954,48 @@ export class Multiplayer {
     this.timers.get(room.id)?.();
     this.timers.delete(room.id);
     if (!this.ready()) return;
-    let deadline: number | undefined;
-    if (state && !state.result) deadline = state.turn.deadline;
-    else if (room.status === 'lobby') {
+    const deadlines: number[] = [];
+    if (state && !state.result) {
+      const activePlayers = state.players.filter(
+        (player) => !player.eliminated,
+      );
+      const online = activePlayers.some((player) => this.connected(player.id));
+      if (online) {
+        deadlines.push(state.turn.deadline);
+        for (const player of activePlayers) {
+          const seat = room.players.find((entry) => entry.id === player.id);
+          if (!this.connected(player.id) && seat?.disconnectedAt !== null)
+            deadlines.push(seat!.disconnectedAt! + DISCONNECT_GRACE_MS);
+        }
+      } else {
+        const expirations = activePlayers
+          .map(
+            (player) =>
+              room.players.find((entry) => entry.id === player.id)
+                ?.disconnectedAt,
+          )
+          .filter(
+            (value): value is number => value !== null && value !== undefined,
+          )
+          .map((value) => value + DISCONNECT_GRACE_MS);
+        if (expirations.length === activePlayers.length)
+          deadlines.push(Math.max(...expirations));
+      }
+    } else if (
+      room.players.length > 0 &&
+      room.players.every(
+        (player) =>
+          !this.connected(player.id) && player.disconnectedAt !== null,
+      )
+    ) {
+      deadlines.push(
+        Math.max(
+          ...room.players.map(
+            (player) => player.disconnectedAt! + DISCONNECT_GRACE_MS,
+          ),
+        ),
+      );
+    } else if (room.status === 'lobby') {
       const host = room.players.find((p) => p.id === room.hostPlayerId);
       if (
         host &&
@@ -875,8 +1003,9 @@ export class Multiplayer {
         host.disconnectedAt !== null &&
         host.disconnectedAt + 120_000 > this.clock.now()
       )
-        deadline = host.disconnectedAt + 120_000;
+        deadlines.push(host.disconnectedAt + 120_000);
     }
+    const deadline = deadlines.length ? Math.min(...deadlines) : undefined;
     if (deadline !== undefined)
       this.timers.set(
         room.id,

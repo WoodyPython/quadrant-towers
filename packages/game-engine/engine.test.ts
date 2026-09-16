@@ -189,6 +189,67 @@ describe('presets and deterministic setup', () => {
 });
 
 describe('actions and atomic rejection', () => {
+  it('forfeits a disconnected player through a server-only command', () => {
+    const state = createMatch(
+      {
+        id: 'partial-match',
+        playerIds: ['a', 'b'],
+        preset: 'small',
+        seed: 12,
+        now: 1000,
+        cardCatalogVersion: 'framework-1',
+        balanceVersion: 'framework-1',
+      },
+      defaultRegistry,
+    );
+    const loser = state.players[1]!;
+    reject(state, { type: 'forfeit', playerId: loser.id }, state.turn.playerId);
+    const result = applyCommand(
+      state,
+      null,
+      { type: 'forfeit', playerId: loser.id },
+      2000,
+      defaultRegistry,
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.players[1]!.eliminated).toBe(true);
+    expect(
+      result.state.towers.some((tower) => tower.ownerId === loser.id),
+    ).toBe(false);
+    expect(result.state.result).toMatchObject({
+      winnerId: state.players[0]!.id,
+      reason: 'last_survivor',
+    });
+
+    const threePlayerState = createMatch(
+      {
+        id: 'three-player-match',
+        playerIds: ['a', 'b', 'c'],
+        preset: 'small',
+        seed: 12,
+        now: 1000,
+        cardCatalogVersion: 'framework-1',
+        balanceVersion: 'framework-1',
+      },
+      defaultRegistry,
+    );
+    const forfeitedTurn = threePlayerState.turn.playerId;
+    const advanced = applyCommand(
+      threePlayerState,
+      null,
+      { type: 'forfeit', playerId: forfeitedTurn },
+      2000,
+      defaultRegistry,
+    );
+    expect(advanced.ok).toBe(true);
+    if (!advanced.ok) return;
+    expect(advanced.state.result).toBeNull();
+    expect(advanced.state.turn.playerId).not.toBe(forfeitedTurn);
+    expect(
+      advanced.state.players.find((player) => player.id === forfeitedTurn),
+    ).toMatchObject({ eliminated: true });
+  });
   it('does not allow attacks or card targets in an empty quadrant', () => {
     let state = createMatch(
       {

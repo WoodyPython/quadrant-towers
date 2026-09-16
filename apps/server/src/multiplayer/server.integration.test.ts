@@ -144,13 +144,13 @@ function success(response: Ack): Success {
   if (!response.ok) throw new Error(response.code);
   return response;
 }
-async function setup(preset: PresetId = 'small') {
+async function setup(preset: PresetId = 'small', playerCount = 4) {
   const host = await connect();
   const first = success(
     await request(host, 'room:create', { displayName: '  Host  ', preset }),
   );
   identities.push(first.identity!);
-  for (let i = 1; i < 4; i++) {
+  for (let i = 1; i < playerCount; i++) {
     clock.time++;
     identities.push(
       success(
@@ -250,6 +250,76 @@ it('starts with two connected players and closes empty seats to later joins', as
       displayName: 'Late guest',
     }),
   ).toMatchObject({ code: 'ROOM_CLOSED' });
+});
+
+it('eliminates a player after the one-minute reconnect grace and awards the online survivor', async () => {
+  const roomId = await setup('small', 2);
+  await start();
+  clients[1]!.disconnect();
+  await expect
+    .poll(
+      async () => (await store.read(roomId)).room.players[1]!.disconnectedAt,
+    )
+    .toBe(clock.now());
+  clock.advance(59_999);
+  expect((await sync(0)).match!.result).toBeNull();
+  clock.advance(1);
+  const view = (await sync(0)).match!;
+  expect(
+    view.players.find((player) => player.id === identities[1]!.playerId),
+  ).toMatchObject({ eliminated: true });
+  expect(view.result).toMatchObject({
+    winnerId: identities[0]!.playerId,
+    reason: 'last_survivor',
+  });
+  expect(
+    (
+      await database.pool.query(
+        "SELECT payload FROM match_commands WHERE match_id=$1 AND payload->>'type'='forfeit'",
+        [view.matchId],
+      )
+    ).rows,
+  ).toHaveLength(1);
+});
+
+it('deletes an empty lobby immediately and abandons an empty active room after one minute', async () => {
+  const loneClient = await connect();
+  const created = success(
+    await request(loneClient, 'room:create', {
+      displayName: 'Solo',
+      preset: 'small',
+    }),
+  );
+  success(await request(loneClient, 'room:leave', {}));
+  expect(await store.find(created.room!.code)).toBeUndefined();
+
+  clients = [];
+  identities = [];
+  const roomId = await setup('small', 2);
+  const code = identities[0]!.code;
+  await start();
+  clients.at(-2)!.disconnect();
+  clients.at(-1)!.disconnect();
+  await expect
+    .poll(async () =>
+      (await store.read(roomId)).room.players.every(
+        (player) => player.disconnectedAt !== null,
+      ),
+    )
+    .toBe(true);
+  clock.advance(60_000);
+  await expect.poll(() => store.find(code)).toBeUndefined();
+  for (const table of [
+    'rooms',
+    'players',
+    'matches',
+    'match_snapshots',
+    'match_commands',
+    'command_receipts',
+  ])
+    expect((await database.pool.query(`SELECT * FROM ${table}`)).rowCount).toBe(
+      0,
+    );
 });
 
 it.each(['small', 'medium', 'large', 'massive'] as const)(

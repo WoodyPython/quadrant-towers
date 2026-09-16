@@ -33,7 +33,8 @@ export type Command =
     }
   | Action
   | { type: 'end_turn' }
-  | { type: 'timeout' };
+  | { type: 'timeout' }
+  | { type: 'forfeit'; playerId: string };
 export type TargetValue = Cell | string;
 export type Trigger =
   | 'on_selected'

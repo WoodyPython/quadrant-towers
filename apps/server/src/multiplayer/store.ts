@@ -324,6 +324,49 @@ export class Store {
     return result.rows.map((r) => r.id);
   }
 
+  async deleteRoom(id: string): Promise<string[] | null> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const room = await client.query(
+        'SELECT id FROM rooms WHERE id=$1 FOR UPDATE',
+        [id],
+      );
+      if (!room.rows.length) {
+        await client.query('COMMIT');
+        return null;
+      }
+      const seats = (
+        await client.query<{ id: string }>(
+          'SELECT id FROM players WHERE room_id=$1',
+          [id],
+        )
+      ).rows.map((player) => player.id);
+      const matches = (
+        await client.query<{ id: string }>(
+          'SELECT id FROM matches WHERE room_id=$1',
+          [id],
+        )
+      ).rows.map((match) => match.id);
+      await client.query('DELETE FROM command_receipts WHERE room_id=$1', [id]);
+      for (const table of ['match_snapshots', 'match_commands'])
+        await client.query(
+          `DELETE FROM ${table} WHERE match_id=ANY($1::uuid[])`,
+          [matches],
+        );
+      await client.query('DELETE FROM matches WHERE room_id=$1', [id]);
+      await client.query('DELETE FROM players WHERE room_id=$1', [id]);
+      await client.query('DELETE FROM rooms WHERE id=$1', [id]);
+      await client.query('COMMIT');
+      return seats;
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   /** The caller holds the room queue; this transaction also excludes concurrent writes. */
   async cleanup(
     id: string,

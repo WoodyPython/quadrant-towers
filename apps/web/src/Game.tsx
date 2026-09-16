@@ -61,7 +61,6 @@ export function Game() {
   } = useGame();
   const [selection, setSelection] = useState<Selection | null>(null);
   const [leaving, setLeaving] = useState(false);
-  const [historyCount, setHistoryCount] = useState(12);
   const clear = useCallback(() => setSelection(null), []);
   useEffect(() => {
     const escape = (e: KeyboardEvent) => {
@@ -183,6 +182,69 @@ export function Game() {
           : s?.action === 'attack'
             ? 'Choose an enemy cell'
             : null;
+  const cardPicker = chooseCard && !s?.cardId && (
+    <div
+      className={styles.cardOverlay}
+      role="region"
+      aria-labelledby="card-prompt"
+    >
+      <section className={styles.cardPicker}>
+        <span className={styles.cardPromptLabel}>Your turn</span>
+        <h1 id="card-prompt">Choose a card</h1>
+        <p>Pick one card before taking your two actions.</p>
+        <div className={styles.cards}>
+          {view.turn.cardOffer?.map((id) => {
+            const offeredCard = content?.cards.find((entry) => entry.id === id);
+            const rarity = content?.rarities.find(
+              (entry) => entry.id === offeredCard?.rarityId,
+            );
+            return (
+              <button
+                key={id}
+                className={styles.card}
+                disabled={!enabled || !offeredCard}
+                onClick={() => setSelection({ ...base(), cardId: id })}
+              >
+                <span className={styles.cardIcon}>
+                  <Icon
+                    name={
+                      offeredCard?.targets.some((entry) =>
+                        entry.kind.includes('cell'),
+                      )
+                        ? 'eye'
+                        : offeredCard?.lifecycle === 'passive'
+                          ? 'shield'
+                          : 'star'
+                    }
+                    size={30}
+                  />
+                </span>
+                <span>
+                  <strong>
+                    {offeredCard
+                      ? cardTitle(offeredCard.name)
+                      : 'Loading card…'}
+                  </strong>
+                  <small className={styles.rarity}>
+                    <Icon name={rarity?.icon ?? 'circle'} size={13} />
+                    {rarity?.label ?? ''} ·{' '}
+                    {offeredCard?.lifecycle === 'passive'
+                      ? 'Passive'
+                      : 'Consumable'}
+                  </small>
+                  <span className={styles.cardDescription}>
+                    {offeredCard
+                      ? cardDescription(offeredCard.description)
+                      : ''}
+                  </span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+    </div>
+  );
   return (
     <main id="main" className={styles.game}>
       <div className={styles.players} aria-label="Players in turn order">
@@ -247,14 +309,17 @@ export function Game() {
               </>
             )}
           </div>
-          <Board
-            view={view}
-            room={room}
-            playerId={playerId}
-            legal={legal}
-            selected={s?.cell ?? null}
-            onSelect={select}
-          />
+          <div className={styles.boardStage}>
+            <Board
+              view={view}
+              room={room}
+              playerId={playerId}
+              legal={legal}
+              selected={s?.cell ?? null}
+              onSelect={select}
+            />
+            {cardPicker}
+          </div>
           <div className={styles.boardCaption}>
             {tower ? (
               <span>
@@ -376,74 +441,33 @@ export function Game() {
             </section>
           ) : (
             <>
-              <div className={styles.actionHeading}>
-                <h1>
-                  {eliminated
-                    ? 'You’re eliminated'
-                    : chooseCard
-                      ? 'Choose a card'
-                      : myTurn
-                        ? 'Your actions'
-                        : 'Waiting for your turn'}
-                </h1>
-                {myTurn && !chooseCard && (
-                  <span
-                    className={styles.actionCount}
-                    role="img"
-                    aria-label={`${view.turn.actionsRemaining} actions remaining`}
-                  >
-                    {[0, 1].map((i) => (
-                      <i key={i} data-filled={i < view.turn.actionsRemaining} />
-                    ))}
-                  </span>
-                )}
-              </div>
-              {chooseCard && (
-                <div className={styles.cards}>
-                  {view.turn.cardOffer?.map((id) => {
-                    const c = content?.cards.find((c) => c.id === id);
-                    const rarity = content?.rarities.find(
-                      (r) => r.id === c?.rarityId,
-                    );
-                    return (
-                      <button
-                        key={id}
-                        className={styles.card}
-                        data-selected={s?.cardId === id}
-                        disabled={!enabled || !c}
-                        aria-pressed={s?.cardId === id}
-                        onClick={() => setSelection({ ...base(), cardId: id })}
-                      >
-                        <span className={styles.cardIcon}>
-                          <Icon
-                            name={
-                              c?.targets.some((t) => t.kind.includes('cell'))
-                                ? 'eye'
-                                : c?.lifecycle === 'passive'
-                                  ? 'shield'
-                                  : 'star'
-                            }
-                            size={26}
-                          />
-                        </span>
-                        <span>
-                          <strong>
-                            {c ? cardTitle(c.name) : 'Loading card…'}
-                          </strong>
-                          <small className={styles.rarity}>
-                            <Icon name={rarity?.icon ?? 'circle'} size={13} />
-                            {rarity?.label ?? ''} ·{' '}
-                            {c?.lifecycle === 'passive'
-                              ? 'Passive'
-                              : 'Consumable'}
-                          </small>
-                          <span className={styles.cardDescription}>
-                            {c ? cardDescription(c.description) : ''}
-                          </span>
-                        </span>
-                      </button>
-                    );
-                  })}
+              {(!chooseCard || s?.cardId) && (
+                <div className={styles.actionHeading}>
+                  <h1>
+                    {eliminated
+                      ? 'You’re eliminated'
+                      : chooseCard
+                        ? target
+                          ? 'Choose a target'
+                          : 'Confirm your card'
+                        : myTurn
+                          ? 'Your actions'
+                          : 'Waiting for your turn'}
+                  </h1>
+                  {myTurn && !chooseCard && (
+                    <span
+                      className={styles.actionCount}
+                      role="img"
+                      aria-label={`${view.turn.actionsRemaining} actions remaining`}
+                    >
+                      {[0, 1].map((i) => (
+                        <i
+                          key={i}
+                          data-filled={i < view.turn.actionsRemaining}
+                        />
+                      ))}
+                    </span>
+                  )}
                 </div>
               )}
               {!chooseCard && (
@@ -456,7 +480,7 @@ export function Game() {
                         disabled={!actionsAvailable}
                         onClick={() => setSelection({ ...base(), action })}
                       >
-                        <Icon name={action} size={24} />
+                        <Icon name={action} size={30} />
                         <span>
                           {action[0]!.toUpperCase() + action.slice(1)}
                         </span>
@@ -499,6 +523,9 @@ export function Game() {
                     >
                       Reselect target
                     </button>
+                  )}
+                  {Object.keys(s!.targets).length === 0 && !target && (
+                    <button onClick={clear}>Choose another card</button>
                   )}
                 </div>
               )}
@@ -564,22 +591,6 @@ export function Game() {
               )}
             </>
           )}
-          <details className={styles.feed} open>
-            <summary>Moves</summary>
-            <ol tabIndex={0} aria-label="Game events">
-              {history
-                .slice(-historyCount)
-                .reverse()
-                .map((e) => (
-                  <li key={e.sequence}>{eventText(e, room, cardNames)}</li>
-                ))}
-            </ol>
-            {history.length > historyCount && (
-              <button onClick={() => setHistoryCount((n) => n + 30)}>
-                Earlier moves
-              </button>
-            )}
-          </details>
         </aside>
       </div>
       <div
@@ -600,7 +611,7 @@ export function Game() {
           <p>
             {view.result
               ? 'Your seat remains available for a rematch.'
-              : 'Your turn timer will keep running. You can resume this seat from home.'}
+              : 'You can resume this seat from home, but you will be eliminated if you do not reconnect within one minute.'}
           </p>
           <div className={styles.dialogActions}>
             <button onClick={() => setLeaving(false)}>Stay</button>
