@@ -1,6 +1,6 @@
 # Quadrant Towers
 
-Four-player strategy game. [GAME_PLAN.md](GAME_PLAN.md) defines the game. The foundation, deterministic engine, and multiplayer server are implemented; the playable UI follows in Milestone 3. See [Milestone 1](docs/milestone-1.md) for the engine and [Milestone 2](docs/milestone-2.md) for the Socket.IO contract, authentication, persistence, and recovery behavior.
+Four-player strategy game. [GAME_PLAN.md](GAME_PLAN.md) defines the game. The deterministic engine, multiplayer server, and playable browser UI are implemented. See [Milestone 3](docs/milestone-3.md) for gameplay, reconnect behavior, and mobile installation. See [Milestone 1](docs/milestone-1.md) for the engine and [Milestone 2](docs/milestone-2.md) for the Socket.IO contract, authentication, persistence, and recovery behavior.
 
 ## Start from a clean checkout
 
@@ -43,12 +43,12 @@ Copy `.env.example` to `.env` for manual setup. Server startup validates `DATABA
 
 Migrations are explicit and must run before readiness succeeds. Drizzle tracks applied SQL in its migration table; edit the TypeScript schema, generate a new migration, review and commit SQL plus metadata. Never edit already deployed migrations. The second migration adds rooms, identities, matches, latest snapshots, command history, and durable receipts.
 
-Four-client integration tests complete matches on every preset and restart the server mid-match. Accepted commands commit before broadcast; saved offers, effects, and deadlines survive restart. One overdue turn is resolved at recovery time and the next receives 90 seconds. Unknown snapshot/content versions keep readiness unavailable until repaired and the process restarted. See [Milestone 2](docs/milestone-2.md) for local client requests and recovery details; the browser currently displays only the service shell.
+Four-client integration tests complete matches on every preset and restart the server mid-match. Accepted commands commit before broadcast; saved offers, effects, and deadlines survive restart. One overdue turn is resolved at recovery time and the next receives 90 seconds. Unknown snapshot/content versions keep readiness unavailable until repaired and the process restarted. See [Milestone 2](docs/milestone-2.md) for client requests and recovery details. Open four separate browser profiles or devices to play; ordinary tabs share a player seat.
 
-Integration tests require a development/CI database user with `CREATEDB`; they create and drop only a randomly named test database. Use local or ephemeral CI PostgreSQL, never production credentials for tests. JSON logs carry generated request IDs, strip query strings, redact authentication headers, and omit private error details. SIGINT/SIGTERM closes Fastify and the connection pool.
+Integration and browser tests require a development/CI database user with `CREATEDB`; they create and drop only a randomly named test database. Use local or ephemeral CI PostgreSQL, never production credentials for tests. JSON logs carry generated request IDs, strip query strings, redact authentication headers, and omit private error details. SIGINT/SIGTERM closes Fastify and the connection pool.
 
 If setup fails, check the reported command: start Docker Desktop for daemon errors, free occupied ports, install the pinned Node for version errors, and verify package/browser download access. A 503 readiness response usually means PostgreSQL is stopped or `db:migrate` has not run. Docker permission errors require access to the local Docker engine. Retry the bootstrap after correcting the cause.
 
 ## Delivery
 
-GitHub Actions runs formatting, lint, types, tests, multiplayer integration/recovery tests, builds, migration validation, and browser checks on Linux. It uses an ephemeral PostgreSQL service and uploads browser failure artifacts. Railway deployment and four-player browser flows follow in later milestones. When deployment is added, use the same `.nvmrc` runtime pin, bind to `0.0.0.0`, configure `ALLOWED_ORIGINS`, and run one app replica.
+GitHub Actions runs formatting, lint, types, tests, multiplayer integration/recovery tests, builds, migration validation, and browser checks on Linux. It uses an ephemeral PostgreSQL service and uploads browser failure artifacts. Four-player browser flows now cover a complete match, refresh, and rematch. Railway deployment follows in Milestone 4. When deployment is added, use the same `.nvmrc` runtime pin, bind to `0.0.0.0`, configure `ALLOWED_ORIGINS`, and run one app replica.
