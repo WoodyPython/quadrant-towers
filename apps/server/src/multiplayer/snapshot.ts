@@ -38,8 +38,9 @@ const snapshotSchema = z.strictObject({
         cardsSelected: z.record(z.string(), n),
       }),
     )
-    .length(4),
-  turnOrder: z.array(z.uuid()).length(4),
+    .min(2)
+    .max(4),
+  turnOrder: z.array(z.uuid()).min(2).max(4),
   towers: z.array(
     z.strictObject({
       id: idSchema,
@@ -92,9 +93,10 @@ export function parseSnapshot(
   const cards = new Map(catalog.cards.map((c) => [c.id, c]));
   const occupied = new Set<string>();
   if (
-    ids.size !== 4 ||
-    new Set(state.players.map((p) => p.quadrant)).size !== 4 ||
-    new Set(state.turnOrder).size !== 4 ||
+    ids.size !== state.players.length ||
+    new Set(state.players.map((p) => p.quadrant)).size !==
+      state.players.length ||
+    new Set(state.turnOrder).size !== state.players.length ||
     state.turnOrder.some((id) => !ids.has(id)) ||
     !ids.has(state.turn.playerId) ||
     state.turn.round > PRESETS[state.preset].rounds ||

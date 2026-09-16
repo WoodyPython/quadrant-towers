@@ -485,12 +485,48 @@
   user-select: none;
 }
 .boardGrid {
+  position: relative;
   display: grid;
   grid-template-columns: 24px repeat(var(--size), var(--cell));
   grid-template-rows: 24px repeat(var(--size), var(--cell));
   width: max-content;
   padding-right: 2px;
   padding-bottom: 2px;
+}
+.closedQuadrant {
+  position: absolute;
+  width: calc(var(--quadrant) * var(--cell));
+  height: calc(var(--quadrant) * var(--cell));
+  z-index: 2;
+  pointer-events: none;
+  border: 2px solid #697066;
+  background:
+    linear-gradient(
+      to top right,
+      transparent calc(50% - 2px),
+      #697066 calc(50% - 2px),
+      #697066 calc(50% + 2px),
+      transparent calc(50% + 2px)
+    ),
+    linear-gradient(
+      to bottom right,
+      #d8dad2dd calc(50% - 2px),
+      #697066 calc(50% - 2px),
+      #697066 calc(50% + 2px),
+      #d8dad2dd calc(50% + 2px)
+    );
+}
+.closedQuadrant[data-quadrant^='n'] {
+  top: 24px;
+}
+.closedQuadrant[data-quadrant^='s'] {
+  top: calc(24px + var(--quadrant) * var(--cell));
+}
+.closedQuadrant[data-quadrant$='w'] {
+  left: 24px;
+}
+.closedQuadrant[data-quadrant$='e'] {
+  left: calc(24px + var(--quadrant) * var(--cell));
 }
 .boardRow {
   display: contents;

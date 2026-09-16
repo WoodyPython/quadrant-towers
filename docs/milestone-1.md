@@ -52,7 +52,7 @@ if (result.ok) {
 }
 ```
 
-- `createMatch` requires four distinct player IDs, an explicit preset, a uint32 seed, an injected integer timestamp in milliseconds, and registered content versions. It independently shuffles quadrants and turn order, places one 3-health Town Hall per player, and saves the first offer.
+- `createMatch` requires two to four distinct player IDs, an explicit preset, a uint32 seed, an injected integer timestamp in milliseconds, and registered content versions. It independently shuffles quadrants and turn order, places one 3-health Town Hall per player, leaves unassigned quadrants closed, and saves the first offer.
 - `applyCommand` returns a new serializable state on success. Failure returns the original state, with no changes to history, randomness, action count, or timer. Times must be nondecreasing. Ordinary commands are accepted strictly before the deadline.
 - Actions require card selection first. Two valid actions are followed by explicit `end_turn`. Types may repeat. Last-survivor victory interrupts the turn immediately.
 - Only the server calls `applyCommand(state, null, { type: 'timeout' }, now, registry)`, at or after the saved deadline. It resolves one saved offer using the seeded generator and deterministic legal targets, performs remaining random enemy-cell attacks, and advances the turn. A late timeout starts the next 90-second turn at the supplied timestamp.

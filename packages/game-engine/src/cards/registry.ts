@@ -1,4 +1,4 @@
-import { allCells, cellKey, ownsCell } from '../board.js';
+import { allCells, cellKey, occupiedCell, ownsCell } from '../board.js';
 import { PRESETS } from '../board.js';
 import { weighted } from '../random.js';
 import type {
@@ -226,6 +226,7 @@ export function legalTargets(
   return allCells(state.preset).filter(
     (cell) =>
       !ownsCell(state, player, cell) &&
+      occupiedCell(state, cell) &&
       (target.kind === 'enemy_cell' ||
         !player.revealed.includes(cellKey(cell))),
   );

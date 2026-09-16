@@ -13,6 +13,7 @@ import type { MatchView, RoomView } from '@quadrant/protocol';
 import {
   cellLabel,
   coordinate,
+  isAvailable,
   key,
   quadrant,
   type Point,
@@ -33,6 +34,7 @@ const BoardCell = memo(function BoardCell({
   legal,
   selected,
   focused,
+  unavailable,
   onSelect,
   onFocus,
 }: {
@@ -48,6 +50,7 @@ const BoardCell = memo(function BoardCell({
   legal: boolean;
   selected: boolean;
   focused: boolean;
+  unavailable: boolean;
   onSelect: (p: Point) => void;
   onFocus: (p: Point) => void;
 }) {
@@ -59,13 +62,17 @@ const BoardCell = memo(function BoardCell({
       data-fog={fog}
       data-legal={legal}
       data-selected={selected}
+      data-unavailable={unavailable}
       data-edge={edge}
       className={styles.cell}
       aria-label={label}
+      aria-disabled={unavailable}
       aria-pressed={selected}
       tabIndex={focused ? 0 : -1}
       onFocus={() => onFocus({ x, y })}
-      onClick={() => onSelect({ x, y })}
+      onClick={() => {
+        if (!unavailable) onSelect({ x, y });
+      }}
     >
       {health > 0 && (
         <span
@@ -153,6 +160,9 @@ export const Board = memo(function Board({
   const names = useMemo(
     () => new Map(room.players.map((p) => [p.id, p.displayName])),
     [room.players],
+  );
+  const closedQuadrants = (['nw', 'ne', 'sw', 'se'] as const).filter(
+    (quadrant) => !view.players.some((player) => player.quadrant === quadrant),
   );
   const onFocus = useCallback((p: Point) => setFocused(p), []);
   useLayoutEffect(() => {
@@ -298,7 +308,13 @@ export const Board = memo(function Board({
       >
         <div
           className={styles.boardGrid}
-          style={{ '--cell': `${cellSize}px`, '--size': size } as CSSProperties}
+          style={
+            {
+              '--cell': `${cellSize}px`,
+              '--size': size,
+              '--quadrant': size / 2,
+            } as CSSProperties
+          }
         >
           <span />
           {Array.from({ length: size }, (_, x) => (
@@ -336,6 +352,7 @@ export const Board = memo(function Board({
                   : '';
                 const q = quadrant(c.cell, size / 2);
                 const p = view.players.find((p) => p.quadrant === q);
+                const unavailable = !isAvailable(view, c.cell);
                 const owner =
                   room.players.find((p2) => p2.id === p?.id)?.seat ?? 0;
                 return (
@@ -343,7 +360,11 @@ export const Board = memo(function Board({
                     key={key(c.cell)}
                     x={c.cell.x}
                     y={c.cell.y}
-                    label={cellLabel(c, names)}
+                    label={
+                      unavailable
+                        ? `${coordinate(c.cell)}, unavailable region`
+                        : cellLabel(c, names)
+                    }
                     fog={c.visibility === 'hidden'}
                     health={tower?.health ?? 0}
                     hall={tower?.type === 'town_hall'}
@@ -353,12 +374,21 @@ export const Board = memo(function Board({
                     legal={legal.has(key(c.cell))}
                     selected={!!selected && key(selected) === key(c.cell)}
                     focused={key(focused) === key(c.cell)}
+                    unavailable={unavailable}
                     onSelect={pick}
                     onFocus={onFocus}
                   />
                 );
               })}
             </div>
+          ))}
+          {closedQuadrants.map((quadrant) => (
+            <span
+              key={quadrant}
+              className={styles.closedQuadrant}
+              data-quadrant={quadrant}
+              aria-hidden="true"
+            />
           ))}
         </div>
       </div>

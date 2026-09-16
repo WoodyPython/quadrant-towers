@@ -24,7 +24,11 @@ test('home, help, keyboard access and installable assets', async ({
       page
         .getByRole('button', { name: 'Create room', exact: true })
         .first()
-        .evaluate((button) => getComputedStyle(button).webkitTapHighlightColor),
+        .evaluate((button) =>
+          getComputedStyle(button).getPropertyValue(
+            '-webkit-tap-highlight-color',
+          ),
+        ),
     )
     .toBe('rgba(0, 0, 0, 0)');
   await page.keyboard.press('Tab');
@@ -64,6 +68,65 @@ test('home, help, keyboard access and installable assets', async ({
       (await request.get(path, { headers: { accept: 'text/html' } })).status(),
     ).toBe(404);
   expect(errors).toEqual([]);
+});
+
+test('two players can start while empty quadrants remain unavailable', async ({
+  browser,
+}) => {
+  const contexts = await Promise.all([
+    browser.newContext(),
+    browser.newContext(),
+  ]);
+  const [host, guest] = await Promise.all(
+    contexts.map((context) => context.newPage()),
+  );
+  try {
+    await host!.goto('/');
+    await host!.getByLabel('Your name').fill('Ada');
+    await host!.getByRole('radio', { name: /Small/ }).check();
+    await host!
+      .getByRole('button', { name: 'Create room', exact: true })
+      .last()
+      .click();
+    await expect(host!.getByRole('heading', { level: 1 })).toHaveText(
+      /^[A-Z]{6}$/,
+    );
+    const code = await host!.getByRole('heading', { level: 1 }).textContent();
+    await expect(
+      host!.getByRole('button', { name: 'Start game' }),
+    ).toBeDisabled();
+
+    await guest!.goto('/');
+    await guest!
+      .getByRole('button', { name: 'Join room', exact: true })
+      .first()
+      .click();
+    await guest!.getByLabel('Your name').fill('Ben');
+    await guest!.getByLabel('Room code').fill(code!);
+    await guest!
+      .getByRole('button', { name: 'Join room', exact: true })
+      .last()
+      .click();
+    await expect(
+      guest!.getByRole('heading', { name: code!, exact: true }),
+    ).toBeVisible();
+
+    await expect(
+      host!.getByRole('button', { name: 'Start game' }),
+    ).toBeEnabled();
+    await host!.getByRole('button', { name: 'Start game' }).click();
+    for (const page of [host!, guest!]) {
+      await expect(
+        page.getByRole('region', { name: 'Game board' }),
+      ).toBeVisible();
+      await expect(page.locator('[class*="closedQuadrant"]')).toHaveCount(2);
+      await expect(
+        page.locator('[data-cell][aria-disabled="true"]'),
+      ).toHaveCount(72);
+    }
+  } finally {
+    await Promise.all(contexts.map((context) => context.close()));
+  }
 });
 
 for (const [preset, rounds, cells] of [

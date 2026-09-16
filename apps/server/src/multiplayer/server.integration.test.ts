@@ -213,6 +213,45 @@ async function choose(
   });
 }
 
+it('starts with two connected players and closes empty seats to later joins', async () => {
+  const host = await connect();
+  const created = success(
+    await request(host, 'room:create', {
+      displayName: 'Host',
+      preset: 'small',
+    }),
+  );
+  identities.push(created.identity!);
+  expect(
+    await request(host, 'match:start', { commandId: randomUUID() }),
+  ).toMatchObject({ code: 'PLAYERS_NOT_READY' });
+  identities.push(
+    success(
+      await request(await connect(), 'room:join', {
+        code: created.room!.code,
+        displayName: 'Guest',
+      }),
+    ).identity!,
+  );
+  expect(
+    packets
+      .filter((packet) => packet.player === 0 && packet.event === 'room:view')
+      .at(-1)?.data,
+  ).toMatchObject({
+    players: [{ displayName: 'Host' }, { displayName: 'Guest' }],
+  });
+  success(await request(host, 'match:start', { commandId: randomUUID() }));
+  const match = await state(created.room!.id);
+  expect(match.players).toHaveLength(2);
+  expect(match.towers).toHaveLength(2);
+  expect(
+    await request(await connect(), 'room:join', {
+      code: created.room!.code,
+      displayName: 'Late guest',
+    }),
+  ).toMatchObject({ code: 'ROOM_CLOSED' });
+});
+
 it.each(['small', 'medium', 'large', 'massive'] as const)(
   'finishes a %s match after restart, preserving projections and deterministic timeouts',
   async (preset) => {

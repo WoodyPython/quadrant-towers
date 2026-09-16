@@ -129,7 +129,9 @@ export class Store {
         state.version !== saved.version ||
         state.version !== saved.match_version ||
         state.preset !== room.preset ||
-        room.players.length !== 4 ||
+        room.players.length !== state.players.length ||
+        room.players.length < 2 ||
+        room.players.length > 4 ||
         state.players.some(
           (p) => !room.players.some((seat) => seat.id === p.id),
         ) ||

@@ -21,7 +21,7 @@ Run `corepack pnpm test:integration` for real PostgreSQL tests with four Socket.
 | `room:rejoin`   | `{ code, token }`; restores the seat and returns the current room, authorized match view, metadata, and identity. |
 | `room:leave`    | `{}`; removes a lobby seat or detaches an active/finished match connection.                                       |
 | `room:remove`   | `{ playerId }`; host removes a disconnected lobby seat after two minutes.                                         |
-| `match:start`   | `{ commandId }`; host starts with exactly four connected players.                                                 |
+| `match:start`   | `{ commandId }`; host starts with two to four connected players.                                                  |
 | `card:choose`   | `{ commandId, matchId, expectedVersion, cardId, targets }`; selects and resolves the card atomically.             |
 | `action:submit` | `{ commandId, matchId, expectedVersion, action }`; action is build, upgrade, expand, or attack.                   |
 | `turn:end`      | `{ commandId, matchId, expectedVersion }`; explicitly ends a turn after both actions.                             |

@@ -15,7 +15,10 @@ const view: MatchView = {
   dimensions: { quadrantSize: 6, boardSize: 12, rounds: 10 },
   cardCatalogVersion: 'framework-1',
   balanceVersion: 'framework-1',
-  players: [{ id: 'me', quadrant: 'nw', eliminated: false }],
+  players: [
+    { id: 'me', quadrant: 'nw', eliminated: false },
+    { id: 'enemy', quadrant: 'ne', eliminated: false },
+  ],
   turnOrder: ['me'],
   turn: {
     playerId: 'me',
@@ -42,6 +45,7 @@ const view: MatchView = {
     },
     { cell: { x: 6, y: 0 }, visibility: 'hidden' },
     { cell: { x: 7, y: 0 }, visibility: 'visible', tower: null },
+    { cell: { x: 0, y: 6 }, visibility: 'hidden' },
   ],
 };
 describe('authorized board interactions', () => {

@@ -3,6 +3,7 @@ import {
   allCells,
   cellKey,
   inBounds,
+  occupiedCell,
   ownsCell,
   PRESETS,
   QUADRANTS,
@@ -341,8 +342,8 @@ function performAction(
     }
   } else {
     requireRule(
-      !ownsCell(state, player, action.cell),
-      'Cannot attack own quadrant',
+      !ownsCell(state, player, action.cell) && occupiedCell(state, action.cell),
+      'Attack requires an occupied enemy quadrant',
     );
     reveal(state, player.id, action.cell);
     const tower = towerAt(state, action.cell);
@@ -429,10 +430,11 @@ export function createMatch(
   registry: EngineRegistry,
 ): MatchState {
   requireRule(
-    input.playerIds.length === 4 &&
-      new Set(input.playerIds).size === 4 &&
+    input.playerIds.length >= 2 &&
+      input.playerIds.length <= 4 &&
+      new Set(input.playerIds).size === input.playerIds.length &&
       input.playerIds.every((id) => typeof id === 'string' && id.length > 0),
-    'Exactly four distinct players required',
+    'Two to four distinct players required',
   );
   requireRule(Object.hasOwn(PRESETS, input.preset), 'Unknown board preset');
   requireRule(
@@ -541,7 +543,7 @@ export function applyCommand(
         selectCard(next, registry, card.id, targets);
       }
       const enemyCells = allCells(next.preset).filter(
-        (cell) => !ownsCell(next, player, cell),
+        (cell) => !ownsCell(next, player, cell) && occupiedCell(next, cell),
       );
       while (next.turn.actionsRemaining > 0 && !next.result)
         performAction(next, registry, {

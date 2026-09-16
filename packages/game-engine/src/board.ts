@@ -57,6 +57,10 @@ export const ownsCell = (
   player: Player,
   cell: Cell,
 ): boolean => quadrantAt(state.preset, cell) === player.quadrant;
+export const occupiedCell = (state: MatchState, cell: Cell): boolean => {
+  const quadrant = quadrantAt(state.preset, cell);
+  return state.players.some((player) => player.quadrant === quadrant);
+};
 export function coordinateLabel(cell: Cell): string {
   let column = cell.x + 1;
   let label = '';

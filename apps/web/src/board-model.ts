@@ -71,6 +71,10 @@ export function isOwn(view: MatchView, playerId: string, p: Point) {
     quadrant(p, view.dimensions.quadrantSize)
   );
 }
+export function isAvailable(view: MatchView, p: Point) {
+  const region = quadrant(p, view.dimensions.quadrantSize);
+  return view.players.some((player) => player.quadrant === region);
+}
 export function targetsFor(
   view: MatchView,
   playerId: string,
@@ -86,6 +90,7 @@ export function targetsFor(
   return new Set(
     view.cells
       .filter((c) => {
+        if (!isAvailable(view, c.cell)) return false;
         const own = isOwn(view, playerId, c.cell);
         const tower = c.visibility === 'visible' ? c.tower : null;
         switch (mode) {

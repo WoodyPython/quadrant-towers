@@ -64,8 +64,8 @@ function Help({ close }: { close: () => void }) {
     <Dialog title="How to play" close={close}>
       <div className={styles.rules}>
         <p>
-          Four players. One quadrant each. Keep at least one tower alive and
-          finish with the most points.
+          Two to four players. One quadrant each. Empty quadrants are closed.
+          Keep at least one tower alive and finish with the most points.
         </p>
         <h3>Your turn</h3>
         <p>
@@ -276,7 +276,7 @@ function Lobby() {
   if (!room) return null;
   const host = room.hostPlayerId === identity?.playerId;
   const ready =
-    room.players.length === 4 && room.players.every((p) => p.connected);
+    room.players.length >= 2 && room.players.every((p) => p.connected);
   const p = presets[room.preset];
   return (
     <main id="main" className={styles.lobby}>
@@ -348,16 +348,23 @@ function Lobby() {
       </div>
       <div className={styles.lobbyFooter}>
         {host ? (
-          <button
-            className={styles.primary}
-            disabled={!ready || !!pending || connection !== 'online'}
-            onClick={() =>
-              void send('match:start', { commandId: crypto.randomUUID() })
-            }
-          >
-            Start game
-            <Icon name="arrow" />
-          </button>
+          <>
+            <button
+              className={styles.primary}
+              disabled={!ready || !!pending || connection !== 'online'}
+              onClick={() =>
+                void send('match:start', { commandId: crypto.randomUUID() })
+              }
+            >
+              Start game
+              <Icon name="arrow" />
+            </button>
+            {!ready && (
+              <p className={styles.muted}>
+                At least 2 connected players are required.
+              </p>
+            )}
+          </>
         ) : (
           <p className={styles.muted}>Waiting for the host to start</p>
         )}

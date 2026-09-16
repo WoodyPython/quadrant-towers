@@ -68,7 +68,7 @@ const messages: Record<ErrorCode, string> = {
   ROOM_FULL: 'The room is full.',
   ROOM_CLOSED: 'The room is closed to new players.',
   HOST_REQUIRED: 'Only the host can do that.',
-  PLAYERS_NOT_READY: 'Four connected players are required.',
+  PLAYERS_NOT_READY: 'Two connected players are required.',
   SEAT_NOT_REMOVABLE: 'That seat cannot be removed yet.',
   MATCH_NOT_FOUND: 'Match not found.',
   MATCH_FINISHED: 'The match has finished.',
@@ -476,7 +476,7 @@ export class Multiplayer {
   private rematchReady(room: Room, reconnecting?: string) {
     return (
       room.status === 'finished' &&
-      room.players.length === 4 &&
+      room.players.length >= 2 &&
       room.players.every(
         (p) =>
           p.rematchVote === room.matchId &&
@@ -645,7 +645,7 @@ export class Multiplayer {
               if (room.hostPlayerId !== actor) throw new Fault('HOST_REQUIRED');
               if (room.status !== 'lobby') throw new Fault('ROOM_CLOSED');
               if (
-                room.players.length !== 4 ||
+                room.players.length < 2 ||
                 room.players.some((p) => !this.connected(p.id))
               )
                 throw new Fault('PLAYERS_NOT_READY');

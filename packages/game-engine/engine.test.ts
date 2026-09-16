@@ -139,7 +139,8 @@ describe('presets and deterministic setup', () => {
       balanceVersion: 'framework-1',
     };
     for (const patch of [
-      { playerIds: ['a', 'b'] },
+      { playerIds: ['a'] },
+      { playerIds: ['a', 'b', 'c', 'd', 'e'] },
       { playerIds: ['a', 'a', 'b', 'c'] },
       { playerIds: ['', 'a', 'b', 'c'] },
       { seed: -1 },
@@ -154,6 +155,31 @@ describe('presets and deterministic setup', () => {
       createMatch({ ...input, preset: 'unknown' as PresetId }, defaultRegistry),
     ).toThrow();
   });
+  it.each([
+    ['a', 'b'],
+    ['a', 'b', 'c'],
+  ])(
+    'creates a match with %i players and leaves other quadrants empty',
+    (...playerIds) => {
+      const state = createMatch(
+        {
+          id: 'partial-match',
+          playerIds,
+          preset: 'small',
+          seed: 12,
+          now: 0,
+          cardCatalogVersion: 'framework-1',
+          balanceVersion: 'framework-1',
+        },
+        defaultRegistry,
+      );
+      expect(state.players).toHaveLength(playerIds.length);
+      expect(state.towers).toHaveLength(playerIds.length);
+      expect(new Set(state.players.map((player) => player.quadrant)).size).toBe(
+        playerIds.length,
+      );
+    },
+  );
   it('supports column labels beyond Z and orthogonal adjacency only', () => {
     expect(coordinateLabel({ x: 0, y: 0 })).toBe('A1');
     expect(coordinateLabel({ x: 27, y: 27 })).toBe('AB28');
@@ -163,6 +189,33 @@ describe('presets and deterministic setup', () => {
 });
 
 describe('actions and atomic rejection', () => {
+  it('does not allow attacks or card targets in an empty quadrant', () => {
+    let state = createMatch(
+      {
+        id: 'partial-match',
+        playerIds: ['a', 'b'],
+        preset: 'small',
+        seed: 12,
+        now: 1000,
+        cardCatalogVersion: 'framework-1',
+        balanceVersion: 'framework-1',
+      },
+      defaultRegistry,
+    );
+    const occupied = new Set(state.players.map((player) => player.quadrant));
+    const closedCell = allCells(state.preset).find(
+      (cell) => !occupied.has(quadrantAt(state.preset, cell)!),
+    )!;
+    const enemyTargets = legalTargets(state, state.turn.playerId, {
+      id: 'target',
+      kind: 'enemy_cell',
+      timing: 'on_selected',
+      fallback: 'first_legal',
+    });
+    expect(enemyTargets).not.toContainEqual(closedCell);
+    state = chooseNeutral(state);
+    reject(state, { type: 'attack', cell: closedCell });
+  });
   it('requires a card, the active actor, valid clock and exactly two actions', () => {
     let state = setup();
     reject(state, { type: 'build', cell: emptyOwn(state) });

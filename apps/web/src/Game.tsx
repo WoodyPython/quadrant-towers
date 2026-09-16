@@ -357,8 +357,10 @@ export function Game() {
                 <Icon name="arrow" />
               </button>
               <p className={styles.muted}>
-                {room.players.filter((p) => p.rematchVote).length}/4 votes ·{' '}
-                {room.players.filter((p) => p.connected).length}/4 connected
+                {room.players.filter((p) => p.rematchVote).length}/
+                {room.players.length} votes ·{' '}
+                {room.players.filter((p) => p.connected).length}/
+                {room.players.length} connected
               </p>
               <ul className={styles.votes}>
                 {room.players.map((p) => (
