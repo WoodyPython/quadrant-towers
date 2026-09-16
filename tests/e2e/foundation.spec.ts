@@ -5,6 +5,7 @@ import {
   activePage,
   chooseCard,
   checkAccessibility,
+  placeTownHalls,
 } from './helpers.js';
 
 test('home, help, keyboard access and installable assets', async ({
@@ -125,6 +126,7 @@ test('two players can start while empty quadrants remain unavailable', async ({
         page.locator('[data-cell][aria-disabled="true"]'),
       ).toHaveCount(72);
     }
+    await placeTownHalls([host!, guest!]);
     const active = await activePage([host!, guest!]);
     await expect(active.locator('[class*="cardOverlay"]')).toBeVisible();
   } finally {
@@ -195,11 +197,11 @@ for (const [preset, rounds, cells] of [
               .first()
               .click();
           await page.locator('[data-cell][data-legal="true"]').first().click();
-          await expect(
-            page.getByLabel(`${1 - action} actions remaining`),
-          ).toBeVisible();
+          // The second action ends the turn automatically; only the first
+          // action's remaining count is stable enough to assert on.
+          if (action === 0)
+            await expect(page.getByLabel('1 actions remaining')).toBeVisible();
         }
-        await page.getByRole('button', { name: 'End turn' }).click();
       }
       for (const page of pages) {
         await expect(
@@ -212,6 +214,7 @@ for (const [preset, rounds, cells] of [
         );
         await page.getByRole('button', { name: 'Play again' }).click();
       }
+      await placeTownHalls(pages);
       await activePage(pages);
       for (const page of pages) {
         await expect(page.locator('[data-cell]')).toHaveCount(cells);
@@ -250,7 +253,11 @@ for (const [preset, cells] of [
       ).toBeVisible();
       await expect(page.getByLabel('1 actions remaining')).toBeVisible();
       await page.getByRole('button', { name: /^Attack [A-Z]+\d+$/ }).tap();
-      await expect(page.getByLabel('0 actions remaining')).toBeVisible();
+      // The second action ends the turn automatically, so "0 actions
+      // remaining" is too transient to assert on reliably.
+      await expect(
+        page.getByRole('heading', { name: 'Waiting for your turn' }),
+      ).toBeVisible();
       await page.getByRole('button', { name: 'Fit board' }).click();
       const first = page.locator('[data-cell="0,0"]');
       await first.focus();
@@ -281,8 +288,8 @@ for (const [preset, cells] of [
         .getByRole('button', { name: 'Reconnect', exact: true })
         .click();
       await expect(
-        page.getByRole('button', { name: 'End turn' }),
-      ).toBeEnabled();
+        page.getByText('Connection lost.', { exact: false }),
+      ).toHaveCount(0);
     } finally {
       await Promise.all(contexts.map((context) => context.close()));
     }

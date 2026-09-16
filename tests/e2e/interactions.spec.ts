@@ -40,8 +40,7 @@ test('keyboard-only card selection and all four action types', async ({
     await expect(active.getByLabel('1 actions remaining')).toBeVisible();
     await enter(active.getByRole('button', { name: 'Upgrade', exact: true }));
     await enter(active.locator('[data-cell][data-legal="true"]').first());
-    await expect(active.getByLabel('0 actions remaining')).toBeVisible();
-    await enter(active.getByRole('button', { name: 'End turn' }));
+    // The second action ends the turn automatically.
     active = await activePage(pages);
     await keyboardCard(active);
     await enter(active.getByRole('button', { name: 'Expand', exact: true }));
@@ -51,7 +50,10 @@ test('keyboard-only card selection and all four action types', async ({
     await enter(active.getByRole('button', { name: 'Attack', exact: true }));
     await enter(active.locator('[data-cell][data-legal="true"]').first());
     await enter(active.getByRole('button', { name: /^Attack [A-Z]+\d+$/ }));
-    await expect(active.getByLabel('0 actions remaining')).toBeVisible();
+    // The second action ends the turn automatically.
+    await expect(
+      active.getByRole('heading', { name: 'Waiting for your turn' }),
+    ).toBeVisible();
   } finally {
     await Promise.all(contexts.map((context) => context.close()));
   }
@@ -112,15 +114,21 @@ test('players can be eliminated, reconnect, and finish by last survivor', async 
         await active
           .getByRole('button', { name: /^Attack [A-Z]+\d+$/ })
           .click();
+        // The second action ends the turn automatically, so watch for the
+        // turn passing on (or the match ending) rather than the transient
+        // "0 actions remaining" state.
         await expect
-          .poll(
-            async () =>
-              (await active.getByRole('heading', { name: /wins$/ }).count()) >
-                0 ||
-              (await active
-                .getByLabel(`${1 - action} actions remaining`)
-                .count()) > 0,
-          )
+          .poll(async () => {
+            if (
+              (await active.getByRole('heading', { name: /wins$/ }).count()) > 0
+            )
+              return true;
+            return action === 0
+              ? (await active.getByLabel('1 actions remaining').count()) > 0
+              : (await active
+                  .getByRole('heading', { name: 'Waiting for your turn' })
+                  .count()) > 0;
+          })
           .toBe(true);
         const eliminated = pages[victim]!.getByRole('heading', {
           name: /eliminated/,
@@ -132,7 +140,6 @@ test('players can be eliminated, reconnect, and finish by last survivor', async 
         }
       }
       if (await active.getByRole('heading', { name: /wins$/ }).count()) break;
-      await active.getByRole('button', { name: 'End turn' }).click();
     }
     for (const page of pages)
       await expect(page.getByRole('heading', { name: /wins$/ })).toBeVisible();
