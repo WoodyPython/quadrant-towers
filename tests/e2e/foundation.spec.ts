@@ -19,6 +19,14 @@ test('home, help, keyboard access and installable assets', async ({
   ).toBeVisible();
   await checkAccessibility(page);
   await expect(page.getByRole('radio', { name: /Medium/ })).toBeChecked();
+  await expect
+    .poll(() =>
+      page
+        .getByRole('button', { name: 'Create room', exact: true })
+        .first()
+        .evaluate((button) => getComputedStyle(button).webkitTapHighlightColor),
+    )
+    .toBe('rgba(0, 0, 0, 0)');
   await page.keyboard.press('Tab');
   await expect(page.getByRole('link', { name: 'Skip to game' })).toBeFocused();
   await page.getByRole('button', { name: 'How to play' }).click();
