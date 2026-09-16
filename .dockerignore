@@ -1,0 +1,14 @@
+.git
+.env
+.env.*
+!.env.example
+node_modules
+**/node_modules
+**/dist
+.cache
+.pnpm-store
+test-results
+playwright-report
+backups
+*.dump
+*.tsbuildinfo

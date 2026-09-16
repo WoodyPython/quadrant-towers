@@ -8,7 +8,7 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:17.6-alpine
@@ -45,3 +45,24 @@ jobs:
             playwright-report/
             test-results/
           retention-days: 7
+  deploy:
+    needs: check
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.RAILWAY_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    concurrency:
+      group: railway-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - run: npm install --global @railway/cli@5.44.0
+      - run: node scripts/deploy.mjs
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_SERVICE_ID: ${{ vars.RAILWAY_SERVICE_ID }}
+          RAILWAY_ENVIRONMENT_ID: ${{ vars.RAILWAY_ENVIRONMENT_ID }}
+          PRODUCTION_ORIGIN: ${{ vars.PRODUCTION_ORIGIN }}

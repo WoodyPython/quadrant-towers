@@ -22,6 +22,17 @@ async function setup(ready = async () => true) {
   return { app, closeDatabase };
 }
 describe('service API', () => {
+  it('sets secure headers and limits HTTP requests without blocking health checks', async () => {
+    const { app } = await setup();
+    const first = await app.inject('/api/version');
+    expect(first.headers['x-content-type-options']).toBe('nosniff');
+    expect(first.headers['content-security-policy']).toContain(
+      "frame-ancestors 'none'",
+    );
+    for (let i = 0; i < 125; i++) await app.inject('/api/version');
+    expect((await app.inject('/api/version')).statusCode).toBe(429);
+    expect((await app.inject('/health/ready')).statusCode).toBe(200);
+  });
   it('returns validated health and version responses', async () => {
     const { app } = await setup();
     for (const url of ['/health/live', '/health/ready']) {

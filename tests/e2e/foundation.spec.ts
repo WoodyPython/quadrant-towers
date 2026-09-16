@@ -1,84 +1,11 @@
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
-async function startMatch(browser: Browser, preset = 'Small', mobile = false) {
-  const contexts = await Promise.all(
-    Array.from({ length: 4 }, () =>
-      browser.newContext(
-        mobile
-          ? {
-              viewport: { width: 390, height: 844 },
-              isMobile: true,
-              hasTouch: true,
-            }
-          : {},
-      ),
-    ),
-  );
-  const pages = await Promise.all(contexts.map((context) => context.newPage()));
-  await pages[0]!.goto('/');
-  await pages[0]!.getByLabel('Your name').fill('Ada');
-  await pages[0]!.getByRole('radio', { name: new RegExp(preset) }).check();
-  await pages[0]!
-    .getByRole('button', { name: 'Create room', exact: true })
-    .last()
-    .click();
-  await expect(pages[0]!.getByRole('heading', { level: 1 })).toHaveText(
-    /^[A-Z]{6}$/,
-  );
-  const code = await pages[0]!.getByRole('heading', { level: 1 }).textContent();
-  for (let i = 1; i < 4; i++) {
-    const page = pages[i]!;
-    await page.goto('/');
-    await page
-      .getByRole('button', { name: 'Join room', exact: true })
-      .first()
-      .click();
-    await page.getByLabel('Your name').fill(['Ada', 'Ben', 'Cleo', 'Dara'][i]!);
-    await page.getByLabel('Room code').fill(code!);
-    await page
-      .getByRole('button', { name: 'Join room', exact: true })
-      .last()
-      .click();
-    await expect(page.getByRole('heading', { name: code! })).toBeVisible();
-  }
-  await pages[0]!.getByRole('button', { name: 'Start game' }).click();
-  for (const page of pages)
-    await expect(
-      page.getByRole('region', { name: 'Game board' }),
-    ).toBeVisible();
-  return { pages, contexts };
-}
-async function activePage(pages: Page[]) {
-  let active: Page | undefined;
-  await expect
-    .poll(async () => {
-      for (const page of pages)
-        if (
-          await page
-            .getByRole('heading', { name: 'Choose a card', exact: true })
-            .count()
-        ) {
-          active = page;
-          return true;
-        }
-      return false;
-    })
-    .toBe(true);
-  return active!;
-}
-async function chooseCard(page: Page) {
-  const cards = page
-    .getByRole('button')
-    .filter({ hasText: /Consumable|Passive/ });
-  await cards.first().click();
-  const play = page.getByRole('button', { name: /^Play / });
-  if (!(await play.isEnabled()))
-    await page.locator('[data-cell][data-legal="true"]').first().click();
-  await play.click();
-  await expect(
-    page.getByRole('heading', { name: 'Your actions' }),
-  ).toBeVisible();
-}
+import {
+  startMatch,
+  activePage,
+  chooseCard,
+  checkAccessibility,
+} from './helpers.js';
 
 test('home, help, keyboard access and installable assets', async ({
   page,
@@ -90,11 +17,18 @@ test('home, help, keyboard access and installable assets', async ({
   await expect(
     page.getByRole('heading', { name: 'Quadrant Towers.' }),
   ).toBeVisible();
+  await checkAccessibility(page);
   await expect(page.getByRole('radio', { name: /Medium/ })).toBeChecked();
   await page.keyboard.press('Tab');
   await expect(page.getByRole('link', { name: 'Skip to game' })).toBeFocused();
   await page.getByRole('button', { name: 'How to play' }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
+  await page.getByRole('dialog').evaluate(async (dialog) => {
+    await Promise.all(
+      dialog.getAnimations().map((animation) => animation.finished),
+    );
+  });
+  await checkAccessibility(page);
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'How to play' })).toBeFocused();
@@ -124,80 +58,99 @@ test('home, help, keyboard access and installable assets', async ({
   expect(errors).toEqual([]);
 });
 
-test('four browsers complete a match, refresh, and rematch through the UI', async ({
-  browser,
-}) => {
-  test.setTimeout(240_000);
-  const { pages, contexts } = await startMatch(browser);
-  const errors: string[] = [];
-  pages.forEach((page) =>
-    page.on('pageerror', (error) => errors.push(error.message)),
-  );
-  try {
-    let refreshed = false;
-    for (let turn = 0; turn < 40; turn++) {
-      const page = await activePage(pages);
-      if (!refreshed) {
-        await expect(
-          page
+for (const [preset, rounds, cells] of [
+  ['Small', 10, 144],
+  ['Medium', 12, 256],
+  ['Large', 16, 400],
+  ['Massive', 22, 784],
+] as const) {
+  test(`${preset}: four browsers complete a match, refresh, and rematch through the UI`, async ({
+    browser,
+  }) => {
+    test.setTimeout(480_000);
+    const { pages, contexts } = await startMatch(browser, preset);
+    if (preset === 'Small') await checkAccessibility(pages[0]!);
+    const errors: string[] = [];
+    pages.forEach((page) =>
+      page.on('pageerror', (error) => errors.push(error.message)),
+    );
+    try {
+      let refreshed = false;
+      for (let turn = 0; turn < rounds * 4; turn++) {
+        const page = await activePage(pages);
+        if (!refreshed) {
+          await expect(
+            page
+              .getByRole('button')
+              .filter({ hasText: /Consumable|Passive/ })
+              .first(),
+          ).toBeEnabled();
+          const offer = await page
             .getByRole('button')
             .filter({ hasText: /Consumable|Passive/ })
-            .first(),
-        ).toBeEnabled();
-        const offer = await page
-          .getByRole('button')
-          .filter({ hasText: /Consumable|Passive/ })
-          .allTextContents();
-        await page.reload();
-        await expect(
-          page.getByRole('heading', { name: 'Choose a card' }),
-        ).toBeVisible();
-        await expect(
-          page
-            .getByRole('button')
-            .filter({ hasText: /Consumable|Passive/ })
-            .first(),
-        ).toBeEnabled();
-        expect(
+            .allTextContents();
+          await page.reload();
+          await expect(
+            page.getByRole('heading', { name: 'Choose a card' }),
+          ).toBeVisible();
+          await expect(
+            page
+              .getByRole('button')
+              .filter({ hasText: /Consumable|Passive/ })
+              .first(),
+          ).toBeEnabled();
+          expect(
+            await page
+              .getByRole('button')
+              .filter({ hasText: /Consumable|Passive/ })
+              .allTextContents(),
+          ).toEqual(offer);
+          refreshed = true;
+        }
+        await chooseCard(page);
+        for (let action = 0; action < 2; action++) {
           await page
-            .getByRole('button')
-            .filter({ hasText: /Consumable|Passive/ })
-            .allTextContents(),
-        ).toEqual(offer);
-        refreshed = true;
-      }
-      await chooseCard(page);
-      for (let action = 0; action < 2; action++) {
-        await page
-          .getByRole('button', {
-            name: turn === 0 && action === 0 ? 'Expand' : 'Build',
-            exact: true,
-          })
-          .click();
-        if (turn === 0 && action === 0)
+            .getByRole('button', {
+              name: turn === 0 && action === 0 ? 'Expand' : 'Build',
+              exact: true,
+            })
+            .click();
+          if (turn === 0 && action === 0)
+            await page
+              .locator('[data-cell][data-legal="true"]')
+              .first()
+              .click();
           await page.locator('[data-cell][data-legal="true"]').first().click();
-        await page.locator('[data-cell][data-legal="true"]').first().click();
-        await expect(
-          page.getByLabel(`${1 - action} actions remaining`),
-        ).toBeVisible();
+          await expect(
+            page.getByLabel(`${1 - action} actions remaining`),
+          ).toBeVisible();
+        }
+        await page.getByRole('button', { name: 'End turn' }).click();
       }
-      await page.getByRole('button', { name: 'End turn' }).click();
+      for (const page of pages) {
+        await expect(
+          page.getByRole('heading', { name: /wins$/ }),
+        ).toBeVisible();
+        if (preset === 'Small' && page === pages[0])
+          await checkAccessibility(page);
+        await expect(page.locator('[data-cell][data-fog="true"]')).toHaveCount(
+          0,
+        );
+        await page.getByRole('button', { name: 'Play again' }).click();
+      }
+      await activePage(pages);
+      for (const page of pages) {
+        await expect(page.locator('[data-cell]')).toHaveCount(cells);
+        await expect(page.getByRole('heading', { name: /wins$/ })).toHaveCount(
+          0,
+        );
+      }
+      expect(errors).toEqual([]);
+    } finally {
+      await Promise.all(contexts.map((context) => context.close()));
     }
-    for (const page of pages) {
-      await expect(page.getByRole('heading', { name: /wins$/ })).toBeVisible();
-      await expect(page.locator('[data-cell][data-fog="true"]')).toHaveCount(0);
-      await page.getByRole('button', { name: 'Play again' }).click();
-    }
-    await activePage(pages);
-    for (const page of pages) {
-      await expect(page.locator('[data-cell]')).toHaveCount(144);
-      await expect(page.getByRole('heading', { name: /wins$/ })).toHaveCount(0);
-    }
-    expect(errors).toEqual([]);
-  } finally {
-    await Promise.all(contexts.map((context) => context.close()));
-  }
-});
+  });
+}
 
 for (const [preset, cells] of [
   ['Medium', 256],

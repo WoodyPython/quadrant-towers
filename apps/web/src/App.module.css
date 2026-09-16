@@ -770,6 +770,10 @@
   max-height: 240px;
   overflow: auto;
 }
+.feed ol:focus-visible {
+  outline: 3px solid #1c7557;
+  outline-offset: 3px;
+}
 .feed li {
   color: var(--muted);
   font-size: 12px;

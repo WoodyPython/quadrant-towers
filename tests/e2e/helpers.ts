@@ -1,0 +1,126 @@
+import { expect, type Browser, type Page } from '@playwright/test';
+import { AxeBuilder } from '@axe-core/playwright';
+export async function checkAccessibility(page: Page) {
+  await page.evaluate(async () => {
+    await Promise.all(
+      document
+        .getAnimations()
+        .map((animation) => animation.finished.catch(() => {})),
+    );
+  });
+  const result = await new AxeBuilder({ page }).analyze();
+  expect(
+    result.violations.map(({ id, nodes }) => ({
+      id,
+      nodes: nodes.map(({ target, failureSummary }) => ({
+        target,
+        failureSummary,
+      })),
+    })),
+  ).toEqual([]);
+}
+import {
+  matchViewSchema,
+  type MatchView,
+} from '../../packages/protocol/src/index.js';
+export async function startMatch(
+  browser: Browser,
+  preset = 'Small',
+  mobile = false,
+  origin = 'http://127.0.0.1:3100',
+) {
+  const contexts = await Promise.all(
+    Array.from({ length: 4 }, () =>
+      browser.newContext(
+        mobile
+          ? {
+              viewport: { width: 390, height: 844 },
+              isMobile: true,
+              hasTouch: true,
+            }
+          : {},
+      ),
+    ),
+  );
+  const pages = await Promise.all(contexts.map((context) => context.newPage()));
+  const views: MatchView[][] = pages.map(() => []);
+  const packetErrors: string[] = [];
+  pages.forEach((page, index) =>
+    page.on('websocket', (socket) => {
+      socket.on('framereceived', ({ payload }) => {
+        const text = String(payload);
+        if (!text.startsWith('42[')) return;
+        const [event, data] = JSON.parse(text.slice(2));
+        if (!['match:view', 'match:finished'].includes(event)) return;
+        const parsed = matchViewSchema.safeParse(data);
+        if (!parsed.success)
+          packetErrors.push('Invalid or excessive match projection fields');
+        else views[index]!.push(parsed.data);
+      });
+    }),
+  );
+  await pages[0]!.goto(origin);
+  await pages[0]!.getByLabel('Your name').fill('Ada');
+  await pages[0]!.getByRole('radio', { name: new RegExp(preset) }).check();
+  await pages[0]!
+    .getByRole('button', { name: 'Create room', exact: true })
+    .last()
+    .click();
+  await expect(pages[0]!.getByRole('heading', { level: 1 })).toHaveText(
+    /^[A-Z]{6}$/,
+  );
+  const code = await pages[0]!.getByRole('heading', { level: 1 }).textContent();
+  for (let i = 1; i < 4; i++) {
+    const page = pages[i]!;
+    await page.goto(origin);
+    await page
+      .getByRole('button', { name: 'Join room', exact: true })
+      .first()
+      .click();
+    await page.getByLabel('Your name').fill(['Ada', 'Ben', 'Cleo', 'Dara'][i]!);
+    await page.getByLabel('Room code').fill(code!);
+    await page
+      .getByRole('button', { name: 'Join room', exact: true })
+      .last()
+      .click();
+    await expect(page.getByRole('heading', { name: code! })).toBeVisible();
+  }
+  if (preset === 'Small') await checkAccessibility(pages[0]!);
+  await pages[0]!.getByRole('button', { name: 'Start game' }).click();
+  for (const page of pages)
+    await expect(
+      page.getByRole('region', { name: 'Game board' }),
+    ).toBeVisible();
+  return { pages, contexts, views, packetErrors };
+}
+export async function activePage(pages: Page[]) {
+  let active: Page | undefined;
+  await expect
+    .poll(async () => {
+      for (const page of pages)
+        if (
+          await page
+            .getByRole('heading', { name: 'Choose a card', exact: true })
+            .count()
+        ) {
+          active = page;
+          return true;
+        }
+      return false;
+    })
+    .toBe(true);
+  return active!;
+}
+export async function chooseCard(page: Page) {
+  const cards = page
+    .getByRole('button')
+    .filter({ hasText: /Consumable|Passive/ });
+  await cards.first().click();
+  const play = page.getByRole('button', { name: /^Play / });
+  if (!(await play.isEnabled()))
+    await page.locator('[data-cell][data-legal="true"]').first().click();
+  await play.click();
+  await expect(
+    page.getByRole('heading', { name: 'Your actions' }),
+  ).toBeVisible();
+}

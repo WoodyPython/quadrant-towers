@@ -252,6 +252,21 @@ export function connect() {
   });
   socket.on('server:error', (raw) => {
     const result = ackSchema.safeParse(raw);
+    if (
+      result.success &&
+      !result.data.ok &&
+      result.data.code === 'ROOM_NOT_FOUND'
+    ) {
+      identity(null);
+      set({
+        room: null,
+        match: null,
+        content: null,
+        pending: null,
+        uncertain: false,
+        home: true,
+      });
+    }
     if (result.success && !result.data.ok) set({ error: result.data.message });
   });
   socket.connect();

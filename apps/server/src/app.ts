@@ -9,6 +9,7 @@ import {
 import type { Environment } from './env.js';
 import { Multiplayer, type Clock } from './multiplayer/server.js';
 import type { Store } from './multiplayer/store.js';
+import { clientIp, RateLimiter, securityHeaders } from './security.js';
 
 interface AppOptions {
   environment: Environment;
@@ -20,6 +21,7 @@ interface AppOptions {
 }
 
 export async function buildApp(options: AppOptions) {
+  const limits = new RateLimiter();
   const app = Fastify({
     logger: {
       level: options.environment.LOG_LEVEL,
@@ -39,11 +41,34 @@ export async function buildApp(options: AppOptions) {
     genReqId: () => randomUUID(),
   });
   app.addHook('onClose', options.closeDatabase);
+  app.addHook('onRequest', async (request, reply) => {
+    reply.headers(
+      securityHeaders(options.environment.NODE_ENV === 'production'),
+    );
+    if (!request.url.startsWith('/assets/'))
+      reply.header('Cache-Control', 'no-store');
+    if (
+      !request.url.startsWith('/health/') &&
+      options.environment.RATE_LIMITS &&
+      !limits.allow(
+        clientIp(request.raw, options.environment.TRUST_RAILWAY_PROXY),
+        600,
+        120,
+      )
+    ) {
+      return reply.code(429).header('Retry-After', '1').send({
+        code: 'RATE_LIMITED',
+        message: 'Too many requests. Wait a moment and try again.',
+      });
+    }
+  });
   const multiplayer = options.store
     ? new Multiplayer({
         httpServer: app.server,
         store: options.store,
         origins: options.environment.ALLOWED_ORIGINS,
+        rateLimits: options.environment.RATE_LIMITS,
+        railwayProxy: options.environment.TRUST_RAILWAY_PROXY,
         ...(options.clock ? { clock: options.clock } : {}),
         log: (fields, message) => app.log.info(fields, message),
       })

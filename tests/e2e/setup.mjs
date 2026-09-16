@@ -31,7 +31,8 @@ export default async function setup() {
     app = await buildApp({
       environment: parseEnvironment({
         DATABASE_URL: url.href,
-        NODE_ENV: 'production',
+        NODE_ENV: 'test',
+        RATE_LIMITS: 'false',
         LOG_LEVEL: 'warn',
         ALLOWED_ORIGINS: 'http://127.0.0.1:3100',
       }),

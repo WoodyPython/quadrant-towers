@@ -64,15 +64,18 @@ export class Store {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
-      await client.query('INSERT INTO rooms VALUES ($1,$2,$3,$4,$5,$6,$7)', [
-        room.id,
-        room.code,
-        room.preset,
-        room.status,
-        room.hostPlayerId,
-        room.matchId,
-        room.createdAt,
-      ]);
+      await client.query(
+        'INSERT INTO rooms (id,code,preset,status,host_player_id,match_id,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+        [
+          room.id,
+          room.code,
+          room.preset,
+          room.status,
+          room.hostPlayerId,
+          room.matchId,
+          room.createdAt,
+        ],
+      );
       await this.save(client, { room, state: null }, {});
       await client.query('COMMIT');
     } catch (error) {
@@ -187,8 +190,20 @@ export class Store {
     write: Write,
   ) {
     await client.query(
-      'UPDATE rooms SET status=$2, host_player_id=$3, match_id=$4 WHERE id=$1',
-      [room.id, room.status, room.hostPlayerId, room.matchId],
+      `UPDATE rooms SET status=$2, host_player_id=$3, match_id=$4,
+       inactive_since=CASE WHEN $5::bigint IS NULL THEN NULL ELSE COALESCE(inactive_since,$5) END WHERE id=$1`,
+      [
+        room.id,
+        room.status,
+        room.hostPlayerId,
+        room.matchId,
+        room.players.every((p) => p.disconnectedAt !== null)
+          ? Math.max(
+              room.createdAt,
+              ...room.players.map((p) => p.disconnectedAt ?? room.createdAt),
+            )
+          : null,
+      ],
     );
     await client.query(
       'DELETE FROM players WHERE room_id=$1 AND NOT (id = ANY($2::uuid[]))',
@@ -278,9 +293,106 @@ export class Store {
     if (write.receipt) {
       const r = write.receipt;
       await client.query(
-        'INSERT INTO command_receipts VALUES ($1,$2,$3,$4,$5)',
-        [room.id, r.actorId, r.commandId, r.fingerprint, r.response],
+        'INSERT INTO command_receipts (room_id,actor_id,command_id,fingerprint,response,match_id) VALUES ($1,$2,$3,$4,$5,$6)',
+        [
+          room.id,
+          r.actorId,
+          r.commandId,
+          r.fingerprint,
+          r.response,
+          'matchId' in r.response ? r.response.matchId : (state?.id ?? null),
+        ],
       );
+    }
+    if (state?.result)
+      await client.query(
+        'UPDATE matches SET finished_at=COALESCE(finished_at,$2) WHERE id=$1',
+        [state.id, state.lastCommandAt],
+      );
+  }
+
+  async retentionCandidates(now: number): Promise<string[]> {
+    const result = await this.pool.query<{ id: string }>(
+      `SELECT r.id FROM rooms r WHERE
+      (r.status IN ('lobby','closed') AND r.inactive_since <= $1)
+      OR EXISTS (SELECT 1 FROM matches m WHERE m.room_id=r.id AND m.finished_at <= $2)
+      ORDER BY r.created_at LIMIT 100`,
+      [now - 86_400_000, now - 30 * 86_400_000],
+    );
+    return result.rows.map((r) => r.id);
+  }
+
+  /** The caller holds the room queue; this transaction also excludes concurrent writes. */
+  async cleanup(
+    id: string,
+    now: number,
+    connected: string[],
+  ): Promise<string[] | null> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const room = (
+        await client.query('SELECT * FROM rooms WHERE id=$1 FOR UPDATE', [id])
+      ).rows[0];
+      if (!room) {
+        await client.query('COMMIT');
+        return null;
+      }
+      const seats = (
+        await client.query<{ id: string }>(
+          'SELECT id FROM players WHERE room_id=$1',
+          [id],
+        )
+      ).rows.map((p) => p.id);
+      const expired = (
+        await client.query<{ id: string }>(
+          "SELECT id FROM matches WHERE room_id=$1 AND status='finished' AND finished_at <= $2",
+          [id, now - 30 * 86_400_000],
+        )
+      ).rows.map((m) => m.id);
+      const removeRoom =
+        (['lobby', 'closed'].includes(room.status) &&
+          room.inactive_since !== null &&
+          Number(room.inactive_since) <= now - 86_400_000 &&
+          !seats.some((p) => connected.includes(p))) ||
+        (room.status === 'finished' && expired.includes(room.match_id));
+      if (removeRoom) {
+        // Never discard a newer or active match because older history expired.
+        const newer = await client.query(
+          'SELECT id FROM matches WHERE room_id=$1 AND (finished_at IS NULL OR finished_at > $2)',
+          [id, now - 30 * 86_400_000],
+        );
+        if (newer.rows.length) {
+          await client.query('COMMIT');
+          return null;
+        }
+      }
+      for (const table of ['match_snapshots', 'match_commands'])
+        await client.query(
+          `DELETE FROM ${table} WHERE match_id=ANY($1::uuid[])`,
+          [expired],
+        );
+      await client.query(
+        'DELETE FROM command_receipts WHERE room_id=$1 AND match_id=ANY($2::uuid[])',
+        [id, expired],
+      );
+      await client.query('DELETE FROM matches WHERE id=ANY($1::uuid[])', [
+        expired,
+      ]);
+      if (removeRoom) {
+        await client.query('DELETE FROM command_receipts WHERE room_id=$1', [
+          id,
+        ]);
+        await client.query('DELETE FROM players WHERE room_id=$1', [id]);
+        await client.query('DELETE FROM rooms WHERE id=$1', [id]);
+      }
+      await client.query('COMMIT');
+      return removeRoom ? seats : null;
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw error;
+    } finally {
+      client.release();
     }
   }
 }

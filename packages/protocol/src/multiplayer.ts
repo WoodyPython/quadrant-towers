@@ -244,6 +244,7 @@ export const errorCodeSchema = z.enum([
   'ILLEGAL_COMMAND',
   'MATCH_NOT_FINISHED',
   'SERVICE_UNAVAILABLE',
+  'RATE_LIMITED',
 ]);
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
 export const ackSchema = z.discriminatedUnion('ok', [

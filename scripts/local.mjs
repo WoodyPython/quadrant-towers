@@ -60,7 +60,7 @@ try {
   console.log(
     '\nChecks passed. Starting Quadrant Towers (default: http://127.0.0.1:3000). Ctrl+C stops the app; corepack pnpm db:down stops PostgreSQL.',
   );
-  await run('corepack', ['pnpm', 'start'], { NODE_ENV: 'production' });
+  await run('corepack', ['pnpm', 'start'], { SERVE_STATIC: 'true' });
 } catch (error) {
   console.error(
     `\nLocal setup stopped: ${error.message}\nCheck Node/Corepack, Docker Desktop, network access, and README.md. Existing configuration and database data have been preserved.`,

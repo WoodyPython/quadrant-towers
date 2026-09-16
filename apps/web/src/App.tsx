@@ -41,6 +41,7 @@ export function Dialog({
   }, []);
   return (
     <dialog
+      aria-label={title}
       ref={ref}
       className={styles.dialog}
       onCancel={close}

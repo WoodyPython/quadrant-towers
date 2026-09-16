@@ -212,7 +212,11 @@ export function Game() {
                 </small>
               </span>
               {!view.result && id === view.turn.playerId && (
-                <span className={styles.turnDot} aria-label="Current turn" />
+                <span
+                  className={styles.turnDot}
+                  role="img"
+                  aria-label="Current turn"
+                />
               )}
             </div>
           );
@@ -383,6 +387,7 @@ export function Game() {
                 {myTurn && !chooseCard && (
                   <span
                     className={styles.actionCount}
+                    role="img"
                     aria-label={`${view.turn.actionsRemaining} actions remaining`}
                   >
                     {[0, 1].map((i) => (
@@ -559,7 +564,7 @@ export function Game() {
           )}
           <details className={styles.feed} open>
             <summary>Moves</summary>
-            <ol>
+            <ol tabIndex={0} aria-label="Game events">
               {history
                 .slice(-historyCount)
                 .reverse()

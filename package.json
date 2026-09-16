@@ -11,6 +11,10 @@
     "build:packages": "corepack pnpm --filter @quadrant/protocol --filter @quadrant/game-engine build",
     "build": "corepack pnpm build:packages && corepack pnpm --filter @quadrant/server build && corepack pnpm --filter @quadrant/web build",
     "start": "node --env-file=.env apps/server/dist/index.js",
+    "start:production": "node apps/server/dist/index.js",
+    "db:migrate:production": "node apps/server/dist/db/migrate.js",
+    "db:backup": "node scripts/backup.mjs export",
+    "db:restore-drill": "node scripts/backup.mjs restore-drill",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
@@ -26,6 +30,7 @@
     "local": "node scripts/local.mjs"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@eslint/js": "^9.39.0",
     "@playwright/test": "^1.58.2",
     "@types/node": "^24.10.0",

@@ -21,6 +21,18 @@ const environmentSchema = z.object({
     .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
     .default('info'),
   BUILD_ID: z.string().trim().min(1).max(128).default('local'),
+  TRUST_RAILWAY_PROXY: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+  RATE_LIMITS: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
+  SERVE_STATIC: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
   ALLOWED_ORIGINS: z
     .string()
     .default(
@@ -48,6 +60,18 @@ export function parseEnvironment(input: Record<string, unknown>) {
   if (!result.success) {
     throw new Error(
       `Invalid environment variables: ${[...new Set(result.error.issues.map((issue) => issue.path.join('.')))].join(', ')}`,
+    );
+  }
+  if (
+    result.data.NODE_ENV === 'production' &&
+    (!input.ALLOWED_ORIGINS ||
+      result.data.ALLOWED_ORIGINS.some(
+        (origin) => !origin.startsWith('https://'),
+      ) ||
+      !result.data.RATE_LIMITS)
+  ) {
+    throw new Error(
+      'Invalid environment variables: ALLOWED_ORIGINS or RATE_LIMITS',
     );
   }
   return result.data;

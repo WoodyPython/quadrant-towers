@@ -15,6 +15,13 @@
       "when": 1789523593093,
       "tag": "0001_closed_prism",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789528442464,
+      "tag": "0002_calm_colossus",
+      "breakpoints": true
     }
   ]
 }

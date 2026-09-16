@@ -3,6 +3,25 @@ import { parseEnvironment } from './env.js';
 
 const base = { DATABASE_URL: 'postgresql://user:secret@localhost/test' };
 describe('environment validation', () => {
+  it('requires explicit HTTPS origins and rate limits in production', () => {
+    expect(() => parseEnvironment({ ...base, NODE_ENV: 'production' })).toThrow(
+      'ALLOWED_ORIGINS',
+    );
+    expect(() =>
+      parseEnvironment({
+        ...base,
+        NODE_ENV: 'production',
+        ALLOWED_ORIGINS: 'http://localhost:3000',
+      }),
+    ).toThrow('ALLOWED_ORIGINS');
+    expect(
+      parseEnvironment({
+        ...base,
+        NODE_ENV: 'production',
+        ALLOWED_ORIGINS: 'https://game.example',
+      }).RATE_LIMITS,
+    ).toBe(true);
+  });
   it('uses defaults and coerces a valid port', () => {
     expect(parseEnvironment({ ...base, PORT: '4000' })).toMatchObject({
       PORT: 4000,

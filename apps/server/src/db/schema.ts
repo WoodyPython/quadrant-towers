@@ -22,6 +22,7 @@ export const rooms = pgTable('rooms', {
   hostPlayerId: uuid('host_player_id'),
   matchId: uuid('match_id'),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  inactiveSince: bigint('inactive_since', { mode: 'number' }),
 });
 export const players = pgTable(
   'players',
@@ -52,6 +53,7 @@ export const matches = pgTable('matches', {
   balanceVersion: text('balance_version').notNull(),
   deadline: bigint('deadline', { mode: 'number' }).notNull(),
   result: jsonb('result'),
+  finishedAt: bigint('finished_at', { mode: 'number' }),
 });
 export const matchSnapshots = pgTable('match_snapshots', {
   matchId: uuid('match_id')
@@ -89,6 +91,7 @@ export const commandReceipts = pgTable(
     commandId: uuid('command_id').notNull(),
     fingerprint: text('fingerprint').notNull(),
     response: jsonb('response').notNull(),
+    matchId: uuid('match_id'),
   },
   (t) => [primaryKey({ columns: [t.roomId, t.actorId, t.commandId] })],
 );

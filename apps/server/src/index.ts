@@ -1,4 +1,5 @@
 import { fileURLToPath } from 'node:url';
+import { readFileSync, existsSync } from 'node:fs';
 import { buildApp } from './app.js';
 import { createDatabase } from './db/database.js';
 import { parseEnvironment } from './env.js';
@@ -6,14 +7,23 @@ import { defaultRegistry } from '@quadrant/game-engine';
 import { Store } from './multiplayer/store.js';
 
 async function main() {
-  const environment = parseEnvironment(process.env);
+  const buildFile = new URL('../../../build-id.txt', import.meta.url);
+  const environment = parseEnvironment({
+    ...process.env,
+    BUILD_ID:
+      process.env.BUILD_ID ??
+      process.env.RAILWAY_GIT_COMMIT_SHA ??
+      (existsSync(buildFile)
+        ? readFileSync(buildFile, 'utf8').trim()
+        : 'local'),
+  });
   const database = createDatabase(environment.DATABASE_URL);
   const app = await buildApp({
     environment,
     ready: database.ready,
     closeDatabase: database.close,
     store: new Store(database.pool, defaultRegistry),
-    ...(environment.NODE_ENV === 'production'
+    ...(environment.NODE_ENV === 'production' || environment.SERVE_STATIC
       ? {
           staticRoot: fileURLToPath(
             new URL('../../web/dist/', import.meta.url),

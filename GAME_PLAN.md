@@ -422,7 +422,7 @@ Use **Railway** for one production project:
 - **Database service:** Railway PostgreSQL on the private project network.
 - **Domain:** attach the production custom domain to the application service; Railway terminates TLS.
 - **Region:** choose the Railway region closest to the initial player community and place application and database together.
-- **Deploy:** connect the GitHub repository. Deploy `main` only after CI succeeds; use Railway's generated domain for staging until a separate staging environment is justified.
+- **Deploy:** GitHub Actions deploys tested `main` commits through a serialized Railway CLI job. Disable independent Railway autodeploy. Stop and verify removal of the old app before starting its replacement; players automatically reconnect after the interruption. Use Railway's generated HTTPS domain initially.
 - **Health check:** `/health/ready`.
 - **Start command:** run migrations as a release/deploy step, then start the compiled server bound to `0.0.0.0` and Railway's `PORT`.
 - **Backups:** enable scheduled Postgres volume backups before inviting external testers; add an off-platform logical dump before public launch.

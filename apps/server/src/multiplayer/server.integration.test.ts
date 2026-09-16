@@ -61,12 +61,13 @@ let clients: Client[];
 let identities: { playerId: string; token: string; code: string }[];
 let packets: { player: number; event: string; data: unknown }[];
 
-async function boot() {
+async function boot(rateLimits = false) {
   store = new Store(database.pool, defaultRegistry);
   app = await buildApp({
     environment: parseEnvironment({
       DATABASE_URL: 'postgres://localhost/test',
       LOG_LEVEL: 'silent',
+      RATE_LIMITS: String(rateLimits),
     }),
     ready: database.ready,
     closeDatabase: async () => {},
@@ -868,4 +869,140 @@ it('records a disconnect that happens while a new seat is being committed', asyn
     })
     .toBe(clock.now());
   spy.mockRestore();
+});
+
+it('limits socket work before persistence, refills, and allows four players behind one IP', async () => {
+  await app.close();
+  await boot(true);
+  await setup();
+  await start();
+  let limited = 0;
+  for (let i = 0; i < 40; i++) {
+    const response = await request(clients[0]!, 'turn:sync', {});
+    if (!response.ok && response.code === 'RATE_LIMITED') limited++;
+  }
+  expect(limited).toBeGreaterThan(0);
+  clock.advance(60_000);
+  expect((await request(clients[0]!, 'turn:sync', {})).ok).toBe(true);
+  expect(
+    (
+      await database.pool.query(
+        'SELECT count(*)::int AS n FROM command_receipts',
+      )
+    ).rows[0].n,
+  ).toBe(1);
+});
+
+it('expires only disconnected lobbies at the 24-hour boundary', async () => {
+  const client = await connect();
+  const created = success(
+    await request(client, 'room:create', {
+      displayName: 'Host',
+      preset: 'small',
+    }),
+  );
+  const id = created.room!.id;
+  const cutoff = clock.now() + 86_400_000;
+  expect(
+    await store.cleanup(id, cutoff, [created.identity!.playerId]),
+  ).toBeNull();
+  await app.close();
+  expect(await store.retentionCandidates(cutoff - 1)).not.toContain(id);
+  expect(await store.retentionCandidates(cutoff)).toContain(id);
+  expect(await store.cleanup(id, cutoff, [])).toEqual([
+    created.identity!.playerId,
+  ]);
+  expect(await store.find(created.room!.code)).toBeUndefined();
+  expect(await store.cleanup(id, cutoff, [])).toBeNull();
+});
+
+it('prunes expired history without removing a newer rematch, then expires the finished room', async () => {
+  const roomId = await setup();
+  await start();
+  let current = await state(roomId);
+  while (!current.result) {
+    clock.advance(current.turn.deadline - clock.now());
+    await sync();
+    current = await state(roomId);
+  }
+  const firstId = current.id;
+  const firstFinished = current.lastCommandAt;
+  for (let i = 0; i < 4; i++)
+    success(
+      await request(clients[i]!, 'rematch:vote', {
+        commandId: randomUUID(),
+        matchId: firstId,
+      }),
+    );
+  const nextId = (await state(roomId)).id;
+  expect(
+    await store.cleanup(
+      roomId,
+      firstFinished + 30 * 86_400_000,
+      identities.map((p) => p.playerId),
+    ),
+  ).toBeNull();
+  expect((await state(roomId)).id).toBe(nextId);
+  expect(
+    (await database.pool.query('SELECT id FROM matches WHERE id=$1', [firstId]))
+      .rowCount,
+  ).toBe(0);
+  expect(
+    (
+      await database.pool.query(
+        'SELECT * FROM command_receipts WHERE match_id=$1',
+        [firstId],
+      )
+    ).rowCount,
+  ).toBe(0);
+  current = await state(roomId);
+  while (!current.result) {
+    clock.advance(current.turn.deadline - clock.now());
+    await sync();
+    current = await state(roomId);
+  }
+  expect(
+    await store.cleanup(
+      roomId,
+      current.lastCommandAt + 30 * 86_400_000 - 1,
+      [],
+    ),
+  ).toBeNull();
+  expect(
+    await store.cleanup(roomId, current.lastCommandAt + 30 * 86_400_000, []),
+  ).toHaveLength(4);
+  for (const table of [
+    'rooms',
+    'players',
+    'matches',
+    'match_snapshots',
+    'match_commands',
+    'command_receipts',
+  ])
+    expect((await database.pool.query(`SELECT * FROM ${table}`)).rowCount).toBe(
+      0,
+    );
+}, 60_000);
+
+it('bounds pending socket work and logs safe identifiers without private state', async () => {
+  const log = vi.spyOn(app.log, 'info');
+  await setup();
+  await start();
+  const responses = await Promise.all(
+    Array.from({ length: 30 }, () => request(clients[0]!, 'turn:sync', {})),
+  );
+  expect(responses.some((r) => !r.ok && r.code === 'RATE_LIMITED')).toBe(true);
+  expect(responses.some((r) => r.ok)).toBe(true);
+  const fields = JSON.stringify(log.mock.calls);
+  for (const identity of identities)
+    expect(fields).not.toContain(identity.token);
+  for (const secret of [
+    'cardOffer',
+    'rngState',
+    'tokenHash',
+    'seed',
+    'snapshot',
+  ])
+    expect(fields).not.toContain(secret);
+  expect(fields).toContain('Command completed');
 });

@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomInt, randomUUID } from 'node:crypto';
 import type { Server as HttpServer } from 'node:http';
 import { Server, type Socket } from 'socket.io';
+import { clientIp, RateLimiter, securityHeaders } from '../security.js';
 import {
   applyCommand,
   createMatch,
@@ -59,6 +60,7 @@ class Fault extends Error {
   }
 }
 const messages: Record<ErrorCode, string> = {
+  RATE_LIMITED: 'Too many requests. Wait a moment and try again.',
   INVALID_REQUEST: 'The request is invalid.',
   UNAUTHORIZED: 'Rejoin your player seat.',
   ALREADY_SEATED: 'Leave your current room first.',
@@ -116,6 +118,8 @@ export interface MultiplayerOptions {
   httpServer: HttpServer;
   store: Store;
   origins: string[];
+  rateLimits?: boolean;
+  railwayProxy?: boolean;
   clock?: Clock;
   catalogVersion?: string;
   balanceVersion?: string;
@@ -139,6 +143,9 @@ export class Multiplayer {
   private readonly balanceVersion: string;
   private closing = false;
   private recovered = false;
+  private readonly limits = new RateLimiter();
+  private maintenance?: ReturnType<typeof setInterval>;
+  private maintaining = false;
   constructor(private readonly options: MultiplayerOptions) {
     this.store = options.store;
     this.registry = options.store.registry;
@@ -151,14 +158,61 @@ export class Multiplayer {
       allowRequest: (request, callback) =>
         callback(
           null,
-          !request.headers.origin ||
-            options.origins.includes(request.headers.origin),
+          (!request.headers.origin ||
+            options.origins.includes(request.headers.origin)) &&
+            (options.rateLimits === false ||
+              this.limits.allow(
+                `handshake:${clientIp(request, options.railwayProxy ?? false)}`,
+                60,
+                20,
+                this.clock.now(),
+              )),
         ),
     });
+    this.io.engine.on('headers', (headers: Record<string, string>) => {
+      Object.assign(
+        headers,
+        securityHeaders(
+          options.origins.every((origin) => origin.startsWith('https://')),
+        ),
+      );
+    });
+    this.io.use((socket, next) => {
+      const ip = clientIp(socket.request, options.railwayProxy ?? false);
+      next(
+        options.rateLimits !== false &&
+          !this.limits.allow(`connect:${ip}`, 60, 20, this.clock.now())
+          ? new Error(messages.RATE_LIMITED)
+          : undefined,
+      );
+    });
     this.io.on('connection', (socket) => {
+      let pending = 0;
+      const ip = clientIp(socket.request, options.railwayProxy ?? false);
       for (const event of Object.keys(requestSchemas) as RequestEvent[]) {
         socket.on(event, ((raw: unknown, acknowledge: unknown) => {
+          const now = this.clock.now();
+          const allowed =
+            options.rateLimits === false ||
+            (this.limits.allow(`ip:${ip}`, 600, 120, now) &&
+              this.limits.allow(`socket:${socket.id}`, 120, 30, now) &&
+              (!socket.data.playerId ||
+                this.limits.allow(
+                  `player:${socket.data.playerId}`,
+                  120,
+                  30,
+                  now,
+                )) &&
+              (event !== 'room:create' ||
+                this.limits.allow(`create:${ip}`, 10, 5, now)) &&
+              (!['room:join', 'room:rejoin'].includes(event) ||
+                this.limits.allow(`join:${ip}`, 60, 20, now)));
           if (typeof acknowledge !== 'function') return;
+          if (!allowed || pending >= 8) {
+            acknowledge(rejection('RATE_LIMITED'));
+            return;
+          }
+          pending++;
           void this.queues
             .run(`socket:${socket.id}`, async () => {
               let response: Ack;
@@ -168,9 +222,40 @@ export class Multiplayer {
                 const parsed = requestSchemas[event].safeParse(raw);
                 if (!parsed.success) throw new Fault('INVALID_REQUEST');
                 response = await this.dispatch(socket, event, parsed.data);
+                this.options.log?.(
+                  {
+                    event,
+                    playerId: socket.data.playerId,
+                    roomId: socket.data.roomId,
+                    ...('commandId' in parsed.data
+                      ? { commandId: parsed.data.commandId }
+                      : {}),
+                    ...('matchId' in parsed.data
+                      ? {
+                          matchId: parsed.data.matchId,
+                          version:
+                            'expectedVersion' in parsed.data
+                              ? parsed.data.expectedVersion
+                              : undefined,
+                        }
+                      : {}),
+                    durationMs: this.clock.now() - now,
+                    outcome: 'accepted',
+                  },
+                  'Command completed',
+                );
               } catch (error) {
                 response = rejection(
                   error instanceof Fault ? error.code : 'SERVICE_UNAVAILABLE',
+                );
+                this.options.log?.(
+                  {
+                    event,
+                    playerId: socket.data.playerId,
+                    code: response.code,
+                    durationMs: this.clock.now() - now,
+                  },
+                  'Command rejected',
                 );
                 if (!(error instanceof Fault))
                   this.options.log?.({ event }, 'Multiplayer operation failed');
@@ -183,6 +268,9 @@ export class Multiplayer {
             })
             .catch(() => {
               socket.emit('server:error', rejection('SERVICE_UNAVAILABLE'));
+            })
+            .finally(() => {
+              pending--;
             });
         }) as never);
       }
@@ -210,6 +298,25 @@ export class Multiplayer {
       for (const id of ids) await this.expire(id);
       this.recovered = true;
       for (const value of this.hot.values()) this.arm(value);
+      this.options.log?.(
+        { rooms: ids.length },
+        'Multiplayer recovery completed',
+      );
+      this.maintenance ??= setInterval(
+        () => {
+          this.options.log?.(
+            {
+              rooms: this.hot.size,
+              connections: this.connections.size,
+              timers: this.timers.size,
+            },
+            'Multiplayer status',
+          );
+          void this.cleanup();
+        },
+        60 * 60 * 1000,
+      ).unref();
+      await this.cleanup();
     } catch {
       this.recovered = false;
       for (const cancel of this.timers.values()) cancel();
@@ -781,6 +888,7 @@ export class Multiplayer {
   }
   async close() {
     this.closing = true;
+    clearInterval(this.maintenance);
     for (const cancel of this.timers.values()) cancel();
     this.timers.clear();
     await this.queues.drain();
@@ -795,7 +903,44 @@ export class Multiplayer {
         })
         .catch(() => {});
     }
-    this.io.disconnectSockets(true);
+    // Close transports, not namespaces: clients automatically reconnect after a deploy.
+    for (const socket of this.io.sockets.sockets.values()) socket.conn.close();
     await new Promise<void>((resolve) => this.io.close(() => resolve()));
+  }
+
+  async cleanup() {
+    if (this.closing || this.maintaining) return;
+    this.maintaining = true;
+    try {
+      const ids = await this.store.retentionCandidates(this.clock.now());
+      let deleted = 0;
+      for (const id of ids) {
+        if (this.closing) break;
+        await this.queues.run(`room:${id}`, async () => {
+          const result = await this.store.cleanup(id, this.clock.now(), [
+            ...this.connections.keys(),
+          ]);
+          if (!result) return;
+          deleted++;
+          this.timers.get(id)?.();
+          this.timers.delete(id);
+          this.hot.delete(id);
+          for (const playerId of result) {
+            const socket = this.connections.get(playerId);
+            socket?.emit('server:error', rejection('ROOM_NOT_FOUND'));
+            if (socket) socket.data = {};
+            this.connections.delete(playerId);
+          }
+        });
+      }
+      this.options.log?.(
+        { examined: ids.length, deleted },
+        'Retention cleanup completed',
+      );
+    } catch {
+      this.options.log?.({}, 'Retention cleanup failed');
+    } finally {
+      this.maintaining = false;
+    }
   }
 }
