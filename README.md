@@ -1,6 +1,6 @@
 # Quadrant Towers
 
-Four-player strategy game foundation. [GAME_PLAN.md](GAME_PLAN.md) defines the game; gameplay begins in subsequent milestones.
+Four-player strategy game. [GAME_PLAN.md](GAME_PLAN.md) defines the game. The foundation and deterministic game engine are implemented; multiplayer and the playable UI follow in subsequent milestones. See [Milestone 1](docs/milestone-1.md) for the engine API, card framework, and rule coverage.
 
 ## Start from a clean checkout
 
