@@ -680,6 +680,7 @@ export class Multiplayer {
             } else {
               const request = input as
                 | Requests['action:submit']
+                | Requests['placement:submit']
                 | Requests['card:choose']
                 | Requests['turn:end'];
               const state = aggregate.state;
@@ -701,7 +702,12 @@ export class Multiplayer {
                     }
                   : event === 'action:submit'
                     ? (request as Requests['action:submit']).action
-                    : { type: 'end_turn' };
+                    : event === 'placement:submit'
+                      ? {
+                          type: 'place_town_hall',
+                          cell: (request as Requests['placement:submit']).cell,
+                        }
+                      : { type: 'end_turn' };
               const next = applyCommand(
                 state,
                 actor,

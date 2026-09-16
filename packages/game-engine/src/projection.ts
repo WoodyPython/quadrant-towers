@@ -41,6 +41,7 @@ export function projectMatch(state: MatchState, playerId: string) {
   const view = {
     id: state.id,
     version: state.version,
+    phase: state.phase,
     preset: state.preset,
     dimensions: PRESETS[state.preset],
     cardCatalogVersion: state.cardCatalogVersion,

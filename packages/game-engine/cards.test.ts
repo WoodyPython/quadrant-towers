@@ -58,20 +58,6 @@ function registryFor(...cards: AbilityCardDefinition[]): EngineRegistry {
   catalog.cards.push(...cards);
   return createRegistry([catalog], [frameworkBalance]);
 }
-function setup(registry = defaultRegistry): MatchState {
-  return createMatch(
-    {
-      id: 'test',
-      playerIds: ['a', 'b', 'c', 'd'],
-      preset: 'small',
-      seed: 42,
-      now: 0,
-      cardCatalogVersion: 'framework-1',
-      balanceVersion: 'framework-1',
-    },
-    registry,
-  );
-}
 function run(
   state: MatchState,
   command: Command,
@@ -86,6 +72,33 @@ function run(
   );
   if (!result.ok) throw new Error(result.error);
   return result.state;
+}
+function placeTownHalls(state: MatchState, registry: EngineRegistry) {
+  while (state.phase === 'placement') {
+    const player = state.players.find((p) => p.id === state.turn.playerId)!;
+    const cell = quadrantCells(state.preset, player.quadrant).find(
+      (c) => !towerAt(state, c),
+    )!;
+    state = run(state, { type: 'place_town_hall', cell }, registry);
+  }
+  return state;
+}
+function setup(registry = defaultRegistry): MatchState {
+  return placeTownHalls(
+    createMatch(
+      {
+        id: 'test',
+        playerIds: ['a', 'b', 'c', 'd'],
+        preset: 'small',
+        seed: 42,
+        now: 0,
+        cardCatalogVersion: 'framework-1',
+        balanceVersion: 'framework-1',
+      },
+      registry,
+    ),
+    registry,
+  );
 }
 function select(
   state: MatchState,

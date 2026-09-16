@@ -9,6 +9,8 @@ import {
   projectMatch,
   PRESETS,
   legalTargets,
+  quadrantCells,
+  towerAt,
   type MatchState,
   type PresetId,
 } from '@quadrant/game-engine';
@@ -164,9 +166,25 @@ async function setup(preset: PresetId = 'small', playerCount = 4) {
   return first.room!.id;
 }
 async function start() {
-  return success(
+  const response = success(
     await request(clients[0]!, 'match:start', { commandId: randomUUID() }),
   );
+  const roomId = (await store.find(identities[0]!.code))!;
+  let current = await state(roomId);
+  while (current.phase === 'placement') {
+    const player = current.players.find((p) => p.id === current.turn.playerId)!;
+    const cell = quadrantCells(current.preset, player.quadrant).find(
+      (c) => !towerAt(current, c),
+    )!;
+    success(
+      await request(clients[actor(current)]!, 'placement:submit', {
+        ...envelope(current),
+        cell,
+      }),
+    );
+    current = await state(roomId);
+  }
+  return response;
 }
 async function sync(index = 0) {
   return success(await request(clients[index]!, 'turn:sync', {}));

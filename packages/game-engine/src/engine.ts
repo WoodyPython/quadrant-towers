@@ -227,6 +227,7 @@ function selectCard(
   cardId: string,
   targets: Record<string, TargetValue>,
 ) {
+  requireRule(state.phase === 'battle', 'Match is in placement');
   requireRule(state.turn.selectedCardId === null, 'Card already selected');
   requireRule(state.turn.cardOffer.includes(cardId), 'Card was not offered');
   const card = getCard(state, registry, cardId);
@@ -279,24 +280,81 @@ function finish(state: MatchState, reason: 'last_survivor' | 'round_limit') {
   event(state, state.result.winnerId, 'match_ended', { reason });
 }
 function eliminate(state: MatchState, registry: EngineRegistry) {
-  for (const player of state.players) {
-    if (
-      !player.eliminated &&
-      !state.towers.some((t) => t.ownerId === player.id)
-    ) {
-      player.eliminated = true;
-      event(state, player.id, 'eliminated');
+  // During placement, players legitimately hold no towers yet; only battle
+  // play treats a tower-less player as defeated.
+  if (state.phase === 'battle')
+    for (const player of state.players) {
+      if (
+        !player.eliminated &&
+        !state.towers.some((t) => t.ownerId === player.id)
+      ) {
+        player.eliminated = true;
+        event(state, player.id, 'eliminated');
+      }
     }
-  }
   expireEffects(state, registry);
   if (state.players.filter((p) => !p.eliminated).length === 1)
     finish(state, 'last_survivor');
+}
+function placeTownHall(
+  state: MatchState,
+  registry: EngineRegistry,
+  playerId: string,
+  cell: Cell,
+  now: number,
+) {
+  requireRule(state.phase === 'placement', 'Match is not in placement');
+  const player = playerById(state, playerId);
+  requireRule(
+    ownsCell(state, player, cell) && !towerAt(state, cell),
+    'Placement requires an empty own cell',
+  );
+  const tower: Tower = {
+    id: `tower-${state.nextId++}`,
+    ownerId: player.id,
+    type: 'town_hall',
+    health: 3,
+    cells: [clone(cell)],
+  };
+  state.towers.push(tower);
+  event(state, player.id, 'town_hall_placed', {
+    cell: clone(cell),
+    towerId: tower.id,
+  });
+  advancePlacement(state, registry, now);
+}
+function advancePlacement(
+  state: MatchState,
+  registry: EngineRegistry,
+  now: number,
+) {
+  let index = state.turnOrder.indexOf(state.turn.playerId);
+  for (let i = 0; i < state.turnOrder.length; i++) {
+    index = (index + 1) % state.turnOrder.length;
+    const candidate = playerById(state, state.turnOrder[index]!);
+    if (
+      !candidate.eliminated &&
+      !state.towers.some((t) => t.ownerId === candidate.id)
+    ) {
+      state.turn.playerId = candidate.id;
+      state.turn.deadline = now + TURN_DURATION_MS;
+      return;
+    }
+  }
+  state.phase = 'battle';
+  state.turn.playerId =
+    state.turnOrder.find((id) => !playerById(state, id).eliminated) ??
+    state.turn.playerId;
+  state.turn.number = 1;
+  state.turn.round = 1;
+  beginTurn(state, registry, now);
 }
 function performAction(
   state: MatchState,
   registry: EngineRegistry,
   action: Action,
 ) {
+  requireRule(state.phase === 'battle', 'Match is in placement');
   requireRule(state.turn.selectedCardId !== null, 'Choose a card first');
   requireRule(state.turn.actionsRemaining > 0, 'No actions remaining');
   const player = playerById(state, state.turn.playerId);
@@ -396,6 +454,7 @@ function beginTurn(state: MatchState, registry: EngineRegistry, now: number) {
   });
 }
 function endTurn(state: MatchState, registry: EngineRegistry, now: number) {
+  requireRule(state.phase === 'battle', 'Match is in placement');
   requireRule(
     state.turn.actionsRemaining === 0,
     'Resolve exactly two actions first',
@@ -464,6 +523,7 @@ export function createMatch(
     nextId: 1,
     version: 0,
     lastCommandAt: input.now,
+    phase: 'placement',
     players: input.playerIds.map((id, i) => ({
       id,
       quadrant: quadrants[i]!,
@@ -482,27 +542,16 @@ export function createMatch(
       playerId: turnOrder[0]!,
       number: 1,
       round: 1,
-      actionsRemaining: 2,
+      actionsRemaining: 0,
       cardOffer: [],
       selectedCardId: null,
       deadline: input.now + TURN_DURATION_MS,
     },
   };
-  for (const player of state.players) {
-    const cells = quadrantCells(state.preset, player.quadrant);
-    state.towers.push({
-      id: `tower-${state.nextId++}`,
-      ownerId: player.id,
-      type: 'town_hall',
-      health: 3,
-      cells: [cells[randomIndex(state, cells.length)]!],
-    });
-  }
   event(state, state.turn.playerId, 'setup', {
     quadrants,
     turnOrder: [...turnOrder],
   });
-  beginTurn(state, registry, input.now);
   return state;
 }
 // Invalid transitions return the original object, including RNG, history and action budget.
@@ -532,11 +581,19 @@ export function applyCommand(
       next.towers = next.towers.filter(
         (tower) => tower.ownerId !== command.playerId,
       );
+      if (next.phase === 'placement') {
+        player.eliminated = true;
+        event(next, player.id, 'eliminated');
+      }
       eliminate(next, registry);
       if (!next.result && next.turn.playerId === player.id) {
-        expireEffects(next, registry, true);
-        event(next, player.id, 'turn_ended');
-        advanceTurn(next, registry, now);
+        if (next.phase === 'placement') {
+          advancePlacement(next, registry, now);
+        } else {
+          expireEffects(next, registry, true);
+          event(next, player.id, 'turn_ended');
+          advanceTurn(next, registry, now);
+        }
       }
     } else if (command.type === 'timeout') {
       requireRule(actorId === null, 'Timeout is server-only');
@@ -544,29 +601,42 @@ export function applyCommand(
       const player = playerById(next, next.turn.playerId);
       player.timedOutTurns++;
       event(next, player.id, 'timeout');
-      if (next.turn.selectedCardId === null) {
-        const card = getCard(
+      if (next.phase === 'placement') {
+        const cells = quadrantCells(next.preset, player.quadrant).filter(
+          (cell) => !towerAt(next, cell),
+        );
+        placeTownHall(
           next,
           registry,
-          next.turn.cardOffer[randomIndex(next, 3)]!,
+          player.id,
+          cells[randomIndex(next, cells.length)]!,
+          now,
         );
-        const targets = Object.fromEntries(
-          card.targets.map((target) => [
-            target.id,
-            legalTargets(next, player.id, target)[0]!,
-          ]),
+      } else {
+        if (next.turn.selectedCardId === null) {
+          const card = getCard(
+            next,
+            registry,
+            next.turn.cardOffer[randomIndex(next, 3)]!,
+          );
+          const targets = Object.fromEntries(
+            card.targets.map((target) => [
+              target.id,
+              legalTargets(next, player.id, target)[0]!,
+            ]),
+          );
+          selectCard(next, registry, card.id, targets);
+        }
+        const enemyCells = allCells(next.preset).filter(
+          (cell) => !ownsCell(next, player, cell) && occupiedCell(next, cell),
         );
-        selectCard(next, registry, card.id, targets);
+        while (next.turn.actionsRemaining > 0 && !next.result)
+          performAction(next, registry, {
+            type: 'attack',
+            cell: enemyCells[randomIndex(next, enemyCells.length)]!,
+          });
+        if (!next.result) endTurn(next, registry, now);
       }
-      const enemyCells = allCells(next.preset).filter(
-        (cell) => !ownsCell(next, player, cell) && occupiedCell(next, cell),
-      );
-      while (next.turn.actionsRemaining > 0 && !next.result)
-        performAction(next, registry, {
-          type: 'attack',
-          cell: enemyCells[randomIndex(next, enemyCells.length)]!,
-        });
-      if (!next.result) endTurn(next, registry, now);
     } else {
       requireRule(
         actorId === state.turn.playerId &&
@@ -583,6 +653,9 @@ export function applyCommand(
         case 'expand':
         case 'attack':
           performAction(next, registry, command);
+          break;
+        case 'place_town_hall':
+          placeTownHall(next, registry, actorId, command.cell, now);
           break;
         case 'end_turn':
           endTurn(next, registry, now);

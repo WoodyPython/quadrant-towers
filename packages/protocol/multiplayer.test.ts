@@ -65,6 +65,38 @@ it('rejects forged identities, timeout commands, missing versions, and malformed
   ).toBe(false);
 });
 
+it('accepts a placement-phase match view with an empty card offer', () => {
+  expect(
+    matchViewSchema.safeParse({
+      matchId: randomUUID(),
+      version: 0,
+      phase: 'placement',
+      preset: 'small',
+      dimensions: { quadrantSize: 6, boardSize: 12, rounds: 10 },
+      cardCatalogVersion: 'framework-1',
+      balanceVersion: 'framework-1',
+      players: [
+        { id: 'a', quadrant: 'nw', eliminated: false },
+        { id: 'b', quadrant: 'ne', eliminated: false },
+      ],
+      turnOrder: ['a', 'b'],
+      turn: {
+        playerId: 'a',
+        number: 1,
+        round: 1,
+        deadline: 1000,
+        actionsRemaining: 0,
+        cardOffer: [],
+        selectedCardId: null,
+      },
+      cells: [],
+      effects: [],
+      history: [],
+      result: null,
+    }).success,
+  ).toBe(true);
+});
+
 it('does not accept arbitrary private state as a match view or arbitrary errors as acknowledgements', () => {
   expect(
     matchViewSchema.safeParse({ seed: 42, rngState: 7, towers: [] }).success,

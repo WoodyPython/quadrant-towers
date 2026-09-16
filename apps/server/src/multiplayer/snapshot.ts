@@ -18,6 +18,7 @@ import {
 const n = z.number().int().nonnegative();
 const snapshotSchema = z.strictObject({
   id: z.uuid(),
+  phase: z.enum(['placement', 'battle']),
   preset: presetSchema,
   cardCatalogVersion: idSchema,
   balanceVersion: idSchema,
@@ -69,7 +70,7 @@ const snapshotSchema = z.strictObject({
     number: n,
     round: n.min(1),
     actionsRemaining: n.max(2),
-    cardOffer: z.array(idSchema).length(3),
+    cardOffer: z.array(idSchema),
     selectedCardId: idSchema.nullable(),
     deadline: n,
   }),
@@ -92,6 +93,11 @@ export function parseSnapshot(
   const ids = new Set(state.players.map((p) => p.id));
   const cards = new Map(catalog.cards.map((c) => [c.id, c]));
   const occupied = new Set<string>();
+  const validCardOffer =
+    state.phase === 'battle'
+      ? new Set(state.turn.cardOffer).size === 3 &&
+        state.turn.cardOffer.every((id) => cards.has(id))
+      : state.turn.cardOffer.length === 0;
   if (
     ids.size !== state.players.length ||
     new Set(state.players.map((p) => p.quadrant)).size !==
@@ -100,10 +106,12 @@ export function parseSnapshot(
     state.turnOrder.some((id) => !ids.has(id)) ||
     !ids.has(state.turn.playerId) ||
     state.turn.round > PRESETS[state.preset].rounds ||
-    new Set(state.turn.cardOffer).size !== 3 ||
-    state.turn.cardOffer.some((id) => !cards.has(id)) ||
+    !validCardOffer ||
     (state.turn.selectedCardId !== null &&
       !state.turn.cardOffer.includes(state.turn.selectedCardId)) ||
+    (state.phase === 'placement' &&
+      (state.turn.selectedCardId !== null ||
+        state.turn.actionsRemaining !== 0)) ||
     (!state.result && state.turn.deadline < state.lastCommandAt) ||
     (!state.result &&
       state.players.find((p) => p.id === state.turn.playerId)!.eliminated) ||
@@ -133,8 +141,12 @@ export function parseSnapshot(
       throw new Error('Disconnected tower');
   }
   for (const player of state.players) {
+    const hasTower = state.towers.some((t) => t.ownerId === player.id);
+    // During placement a player legitimately owns no tower yet without being eliminated.
     if (
-      player.eliminated !== !state.towers.some((t) => t.ownerId === player.id)
+      state.phase === 'battle'
+        ? player.eliminated !== !hasTower
+        : player.eliminated && hasTower
     )
       throw new Error('Invalid elimination');
     for (const key of player.revealed) {

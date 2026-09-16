@@ -75,11 +75,13 @@ export function Game() {
   const eliminated = view?.players.find((p) => p.id === playerId)?.eliminated;
   const enabled =
     connection === 'online' && !pending && !!content && myTurn && !eliminated;
+  const placing = view?.phase === 'placement';
   const card = content?.cards.find((c) => c.id === s?.cardId);
   const target = card?.targets.find((t) => s?.targets[t.id] === undefined);
-  const mode =
-    target?.kind ??
-    (s?.action === 'expand' && !s.towerId ? 'own_tower' : (s?.action ?? ''));
+  const mode = placing
+    ? 'place_town_hall'
+    : (target?.kind ??
+      (s?.action === 'expand' && !s.towerId ? 'own_tower' : (s?.action ?? '')));
   const legal = useMemo(
     () =>
       view && enabled
@@ -87,6 +89,16 @@ export function Game() {
         : new Set<string>(),
     [view, enabled, playerId, mode, s?.towerId],
   );
+  useEffect(() => {
+    if (
+      view &&
+      enabled &&
+      !placing &&
+      view.turn.selectedCardId !== null &&
+      view.turn.actionsRemaining === 0
+    )
+      void send('turn:end', mutation());
+  }, [view, enabled, placing]);
   const base = useCallback(
     (): Selection => ({
       version: view!.version,
@@ -101,6 +113,11 @@ export function Game() {
   const select = useCallback(
     (p: Point) => {
       if (!view) return;
+      if (placing) {
+        if (enabled && legal.has(key(p)))
+          void send('placement:submit', { ...mutation(), cell: p });
+        return;
+      }
       const c = view.cells.find((c) => key(c.cell) === key(p));
       const tower = c?.visibility === 'visible' ? c.tower : null;
       if (!enabled || !mode) {
@@ -139,7 +156,7 @@ export function Game() {
         });
       }
     },
-    [view, enabled, mode, base, legal, target, s, clear],
+    [view, enabled, placing, mode, base, legal, target, s, clear],
   );
   const cardNames = useMemo(
     () => new Map(content?.cards.map((c) => [c.id, cardTitle(c.name)]) ?? []),
@@ -153,7 +170,7 @@ export function Game() {
     selectedCell?.visibility === 'visible' ? selectedCell.tower : null;
   const actor = room.players.find((p) => p.id === view.turn.playerId);
   const winner = room.players.find((p) => p.id === view.result?.winnerId);
-  const chooseCard = myTurn && view.turn.selectedCardId === null;
+  const chooseCard = !placing && myTurn && view.turn.selectedCardId === null;
   const actionsAvailable =
     enabled && !chooseCard && view.turn.actionsRemaining > 0;
   const history = view.result
@@ -290,6 +307,8 @@ export function Game() {
             <span>
               {view.result ? (
                 'Final board'
+              ) : placing ? (
+                'Placement'
               ) : (
                 <>
                   Round <strong>{view.turn.round}</strong>
@@ -303,7 +322,11 @@ export function Game() {
             {!view.result && (
               <>
                 <strong className={styles.turnName}>
-                  {myTurn ? 'Your turn' : `${actor?.displayName}’s turn`}
+                  {myTurn
+                    ? placing
+                      ? 'Your turn to place'
+                      : 'Your turn'
+                    : `${actor?.displayName}’s turn`}
                 </strong>
                 <Timer />
               </>
@@ -439,6 +462,28 @@ export function Game() {
                 ))}
               </ul>
             </section>
+          ) : placing ? (
+            <>
+              <div className={styles.actionHeading}>
+                <h1>
+                  {eliminated
+                    ? 'You’re eliminated'
+                    : myTurn
+                      ? 'Place your Town Hall'
+                      : 'Waiting for placement'}
+                </h1>
+              </div>
+              {myTurn && !eliminated && (
+                <div className={styles.targeting}>
+                  <span>Choose an empty cell in your quadrant</span>
+                </div>
+              )}
+              {!myTurn && !eliminated && (
+                <p className={styles.muted}>
+                  {actor?.displayName} is placing their Town Hall.
+                </p>
+              )}
+            </>
           ) : (
             <>
               {(!chooseCard || s?.cardId) && (
@@ -544,16 +589,6 @@ export function Game() {
                 >
                   Attack {coordinate(s.cell)}
                   <Icon name="attack" size={18} />
-                </button>
-              )}
-              {myTurn && !chooseCard && view.turn.actionsRemaining === 0 && (
-                <button
-                  className={styles.primary}
-                  disabled={!enabled}
-                  onClick={() => void send('turn:end', mutation())}
-                >
-                  End turn
-                  <Icon name="arrow" />
                 </button>
               )}
               {view.effects.length > 0 && (

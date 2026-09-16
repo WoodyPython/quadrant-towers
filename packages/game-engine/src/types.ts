@@ -25,6 +25,7 @@ export type Action =
   | { type: 'upgrade'; towerId: string }
   | { type: 'expand'; towerId: string; cell: Cell }
   | { type: 'attack'; cell: Cell };
+export type Phase = 'placement' | 'battle';
 export type Command =
   | {
       type: 'select_card';
@@ -32,6 +33,7 @@ export type Command =
       targets: Record<string, TargetValue>;
     }
   | Action
+  | { type: 'place_town_hall'; cell: Cell }
   | { type: 'end_turn' }
   | { type: 'timeout' }
   | { type: 'forfeit'; playerId: string };
@@ -133,6 +135,7 @@ export interface GameEvent {
   playerId: string;
   type:
     | 'setup'
+    | 'town_hall_placed'
     | 'card_offer'
     | 'card_selected'
     | 'effect_triggered'
@@ -172,6 +175,7 @@ export interface MatchState {
   nextId: number;
   version: number;
   lastCommandAt: number;
+  phase: Phase;
   players: Player[];
   turnOrder: string[];
   towers: Tower[];

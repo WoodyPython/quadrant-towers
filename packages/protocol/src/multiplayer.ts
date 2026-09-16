@@ -55,6 +55,7 @@ export const requestSchemas = {
       .refine((v) => Object.keys(v).length <= 16),
   }),
   'action:submit': z.strictObject({ ...mutation, action: actionSchema }),
+  'placement:submit': z.strictObject({ ...mutation, cell: cellSchema }),
   'turn:end': z.strictObject(mutation),
   'turn:sync': z.strictObject({}),
   'rematch:vote': z.strictObject({ commandId: z.uuid(), matchId: z.uuid() }),
@@ -123,6 +124,7 @@ export const historySchema = z.array(
     playerId: idSchema,
     type: z.enum([
       'setup',
+      'town_hall_placed',
       'card_offer',
       'card_selected',
       'effect_triggered',
@@ -143,6 +145,7 @@ export const historySchema = z.array(
 export const matchViewSchema = z.strictObject({
   matchId: z.uuid(),
   version: integer,
+  phase: z.enum(['placement', 'battle']),
   preset: presetSchema,
   dimensions: z.strictObject({
     quadrantSize: integer,
@@ -165,7 +168,7 @@ export const matchViewSchema = z.strictObject({
     round: integer,
     deadline: integer,
     actionsRemaining: integer.max(2),
-    cardOffer: z.array(idSchema).length(3).optional(),
+    cardOffer: z.array(idSchema).max(3).optional(),
     selectedCardId: idSchema.nullable().optional(),
   }),
   cells: z.array(

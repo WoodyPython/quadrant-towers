@@ -105,6 +105,7 @@ export function targetsFor(
           case 'damaged_own_tower':
             return own && !!tower && tower.health < 10;
           case 'build':
+          case 'place_town_hall':
             return own && c.visibility === 'visible' && !tower;
           case 'expand':
             return (
@@ -154,6 +155,7 @@ export function eventText(
     room.players.find((p) => p.id === entry.playerId)?.displayName ?? 'Player';
   const details = entry.details;
   const actionNames: Record<string, string> = {
+    town_hall_placed: 'placed their Town Hall',
     build: 'built a tower',
     upgrade: 'upgraded a tower',
     expand: 'expanded a tower',

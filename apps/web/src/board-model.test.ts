@@ -11,6 +11,7 @@ import {
 const view: MatchView = {
   matchId: 'a',
   version: 2,
+  phase: 'battle',
   preset: 'small',
   dimensions: { quadrantSize: 6, boardSize: 12, rounds: 10 },
   cardCatalogVersion: 'framework-1',

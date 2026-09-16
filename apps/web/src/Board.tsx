@@ -123,6 +123,16 @@ export const Board = memo(function Board({
     top: number;
     moved: boolean;
   } | null>(null);
+  const touches = useRef(new Map<number, { x: number; y: number }>());
+  const pinch = useRef<{
+    distance: number;
+    zoom: number;
+    overview: boolean;
+    midX: number;
+    midY: number;
+    scrollLeft: number;
+    scrollTop: number;
+  } | null>(null);
   const suppressClick = useRef(false);
   const coarse =
     typeof matchMedia !== 'undefined' &&
@@ -130,6 +140,37 @@ export const Board = memo(function Board({
   const fitted = Math.max(8, Math.floor((available - 36) / size));
   const minimum = coarse ? 44 : 28;
   const cellSize = overview ? fitted : Math.max(minimum, fitted) * zoom;
+  const live = useRef({ zoom, overview, minimum, fitted });
+  useEffect(() => {
+    live.current = { zoom, overview, minimum, fitted };
+  });
+  useEffect(() => {
+    const el = viewport.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const current = live.current;
+      const base = current.overview ? 1 : current.zoom;
+      const oldCellSize = current.overview
+        ? current.fitted
+        : Math.max(current.minimum, current.fitted) * base;
+      const next = Math.min(
+        3,
+        Math.max(1, base * Math.exp(-e.deltaY * 0.0018)),
+      );
+      const newCellSize = Math.max(current.minimum, current.fitted) * next;
+      const rect = el.getBoundingClientRect();
+      const ratio = newCellSize / oldCellSize;
+      const anchorX = e.clientX - rect.left + el.scrollLeft;
+      const anchorY = e.clientY - rect.top + el.scrollTop;
+      setOverview(false);
+      setZoom(next);
+      el.scrollLeft = anchorX * ratio - (e.clientX - rect.left);
+      el.scrollTop = anchorY * ratio - (e.clientY - rect.top);
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
   useLayoutEffect(() => {
     const el = viewport.current;
     if (positioned.current || !el || available !== el.clientWidth) return;
@@ -243,30 +284,32 @@ export const Board = memo(function Board({
           Fit board
         </button>
         <button onClick={myQuadrant}>My quadrant</button>
-        <span className={styles.spacer} />
-        <button
-          aria-label="Zoom out"
-          disabled={zoom <= 1}
-          onClick={() => setZoom((z) => Math.max(1, z - 0.5))}
-        >
-          <Icon name="minus" size={18} />
-        </button>
-        <button
-          aria-label="Zoom in"
-          disabled={zoom >= 3}
-          onClick={() => {
-            setOverview(false);
-            setZoom((z) => Math.min(3, z + 0.5));
-          }}
-        >
-          <Icon name="build" size={18} />
-        </button>
       </div>
       <div
         ref={viewport}
         className={styles.boardViewport}
         onKeyDown={navigate}
         onPointerDown={(e) => {
+          if (e.pointerType === 'touch') {
+            touches.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+            if (touches.current.size === 2) {
+              suppressClick.current = true;
+              const [a, b] = [...touches.current.values()] as [
+                { x: number; y: number },
+                { x: number; y: number },
+              ];
+              pinch.current = {
+                distance: Math.hypot(a.x - b.x, a.y - b.y),
+                zoom: overview ? 1 : zoom,
+                overview,
+                midX: (a.x + b.x) / 2,
+                midY: (a.y + b.y) / 2,
+                scrollLeft: e.currentTarget.scrollLeft,
+                scrollTop: e.currentTarget.scrollTop,
+              };
+            }
+            return;
+          }
           if (e.pointerType !== 'mouse' || e.button !== 0) return;
           suppressClick.current = false;
           dragging.current = {
@@ -278,6 +321,37 @@ export const Board = memo(function Board({
           };
         }}
         onPointerMove={(e) => {
+          if (e.pointerType === 'touch') {
+            if (!touches.current.has(e.pointerId)) return;
+            touches.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+            const p = pinch.current;
+            if (touches.current.size === 2 && p) {
+              e.preventDefault();
+              const [a, b] = [...touches.current.values()] as [
+                { x: number; y: number },
+                { x: number; y: number },
+              ];
+              const distance = Math.hypot(a.x - b.x, a.y - b.y);
+              const next = Math.min(
+                3,
+                Math.max(1, p.zoom * (distance / p.distance)),
+              );
+              const oldCellSize = p.overview
+                ? fitted
+                : Math.max(minimum, fitted) * p.zoom;
+              const newCellSize = Math.max(minimum, fitted) * next;
+              const ratio = newCellSize / oldCellSize;
+              const rect = e.currentTarget.getBoundingClientRect();
+              const anchorX = p.midX - rect.left + p.scrollLeft;
+              const anchorY = p.midY - rect.top + p.scrollTop;
+              setOverview(false);
+              setZoom(next);
+              e.currentTarget.scrollLeft =
+                anchorX * ratio - (p.midX - rect.left);
+              e.currentTarget.scrollTop = anchorY * ratio - (p.midY - rect.top);
+            }
+            return;
+          }
           const d = dragging.current;
           if (!d) return;
           const dx = e.clientX - d.x,
@@ -292,10 +366,20 @@ export const Board = memo(function Board({
             e.currentTarget.scrollTop = d.top - dy;
           }
         }}
-        onPointerUp={() => {
+        onPointerUp={(e) => {
+          if (e.pointerType === 'touch') {
+            touches.current.delete(e.pointerId);
+            if (touches.current.size < 2) pinch.current = null;
+            return;
+          }
           dragging.current = null;
         }}
-        onPointerCancel={() => {
+        onPointerCancel={(e) => {
+          if (e.pointerType === 'touch') {
+            touches.current.delete(e.pointerId);
+            if (touches.current.size < 2) pinch.current = null;
+            return;
+          }
           dragging.current = null;
         }}
         onClickCapture={(e) => {

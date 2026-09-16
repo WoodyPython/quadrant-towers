@@ -471,7 +471,7 @@
   max-height: calc(100svh - 295px);
   min-height: 220px;
   overscroll-behavior: contain;
-  touch-action: pan-x pan-y pinch-zoom;
+  touch-action: pan-x pan-y;
   scrollbar-width: thin;
   scrollbar-color: #9ca591 transparent;
   user-select: none;
@@ -541,7 +541,7 @@
   border: 1px solid #ffffff80;
   background: var(--tile);
   color: var(--player);
-  touch-action: pan-x pan-y pinch-zoom;
+  touch-action: pan-x pan-y;
 }
 .cell[data-edge~='left'] {
   border-left: 3px solid #59644e;

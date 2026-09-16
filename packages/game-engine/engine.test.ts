@@ -30,24 +30,6 @@ import type {
   PresetId,
 } from './src/index.js';
 
-export function setup(
-  preset: PresetId = 'small',
-  seed = 123,
-  registry = defaultRegistry,
-): MatchState {
-  return createMatch(
-    {
-      id: 'match',
-      playerIds: ['a', 'b', 'c', 'd'],
-      preset,
-      seed,
-      now: 1000,
-      cardCatalogVersion: 'framework-1',
-      balanceVersion: 'framework-1',
-    },
-    registry,
-  );
-}
 export function accept(
   state: MatchState,
   command: Command,
@@ -58,6 +40,40 @@ export function accept(
   const result = applyCommand(state, actor, command, now, registry);
   if (!result.ok) throw new Error(result.error);
   return result.state;
+}
+export function placeTownHalls(
+  state: MatchState,
+  registry: EngineRegistry = defaultRegistry,
+): MatchState {
+  while (state.phase === 'placement') {
+    const player = state.players.find((p) => p.id === state.turn.playerId)!;
+    const cell = quadrantCells(state.preset, player.quadrant).find(
+      (c) => !towerAt(state, c),
+    )!;
+    state = accept(state, { type: 'place_town_hall', cell }, registry);
+  }
+  return state;
+}
+export function setup(
+  preset: PresetId = 'small',
+  seed = 123,
+  registry = defaultRegistry,
+): MatchState {
+  return placeTownHalls(
+    createMatch(
+      {
+        id: 'match',
+        playerIds: ['a', 'b', 'c', 'd'],
+        preset,
+        seed,
+        now: 1000,
+        cardCatalogVersion: 'framework-1',
+        balanceVersion: 'framework-1',
+      },
+      registry,
+    ),
+    registry,
+  );
 }
 export function chooseNeutral(state: MatchState): MatchState {
   state = JSON.parse(JSON.stringify(state)) as MatchState;
@@ -161,17 +177,19 @@ describe('presets and deterministic setup', () => {
   ])(
     'creates a match with %i players and leaves other quadrants empty',
     (...playerIds) => {
-      const state = createMatch(
-        {
-          id: 'partial-match',
-          playerIds,
-          preset: 'small',
-          seed: 12,
-          now: 0,
-          cardCatalogVersion: 'framework-1',
-          balanceVersion: 'framework-1',
-        },
-        defaultRegistry,
+      const state = placeTownHalls(
+        createMatch(
+          {
+            id: 'partial-match',
+            playerIds,
+            preset: 'small',
+            seed: 12,
+            now: 0,
+            cardCatalogVersion: 'framework-1',
+            balanceVersion: 'framework-1',
+          },
+          defaultRegistry,
+        ),
       );
       expect(state.players).toHaveLength(playerIds.length);
       expect(state.towers).toHaveLength(playerIds.length);
@@ -185,6 +203,95 @@ describe('presets and deterministic setup', () => {
     expect(coordinateLabel({ x: 27, y: 27 })).toBe('AB28');
     expect(adjacent({ x: 0, y: 0 }, { x: 1, y: 0 })).toBe(true);
     expect(adjacent({ x: 0, y: 0 }, { x: 1, y: 1 })).toBe(false);
+  });
+});
+
+describe('town hall placement', () => {
+  function fresh(seed = 12) {
+    return createMatch(
+      {
+        id: 'placement-match',
+        playerIds: ['a', 'b', 'c', 'd'],
+        preset: 'small',
+        seed,
+        now: 1000,
+        cardCatalogVersion: 'framework-1',
+        balanceVersion: 'framework-1',
+      },
+      defaultRegistry,
+    );
+  }
+  it('starts in the placement phase with no towers and no actions', () => {
+    const state = fresh();
+    expect(state.phase).toBe('placement');
+    expect(state.towers).toEqual([]);
+    expect(state.turn.playerId).toBe(state.turnOrder[0]);
+    expect(state.turn.actionsRemaining).toBe(0);
+    expect(state.turn.cardOffer).toEqual([]);
+    expect(state.turn.deadline).toBe(1000 + TURN_DURATION_MS);
+  });
+  it('lets each player place only within their own quadrant, in turn order', () => {
+    let state = fresh();
+    for (const playerId of state.turnOrder) {
+      expect(state.turn.playerId).toBe(playerId);
+      const player = state.players.find((p) => p.id === playerId)!;
+      const foreign = quadrantCells(
+        state.preset,
+        QUADRANTS.find((q) => q !== player.quadrant)!,
+      )[0]!;
+      reject(state, { type: 'place_town_hall', cell: foreign });
+      reject(
+        state,
+        {
+          type: 'place_town_hall',
+          cell: quadrantCells(state.preset, player.quadrant)[0]!,
+        },
+        state.turnOrder.find((id) => id !== playerId),
+      );
+      const cell = quadrantCells(state.preset, player.quadrant)[0]!;
+      state = accept(state, { type: 'place_town_hall', cell });
+      const tower = state.towers.find((t) => t.ownerId === playerId)!;
+      expect(tower.type).toBe('town_hall');
+      expect(tower.health).toBe(3);
+      expect(tower.cells).toEqual([cell]);
+      reject(state, { type: 'place_town_hall', cell });
+    }
+    expect(state.phase).toBe('battle');
+    expect(state.turn.playerId).toBe(state.turnOrder[0]);
+    expect(state.turn.number).toBe(1);
+    expect(state.turn.round).toBe(1);
+    expect(state.turn.actionsRemaining).toBe(2);
+    expect(state.turn.cardOffer).toHaveLength(3);
+  });
+  it('rejects a cell already occupied by another placed town hall', () => {
+    let state = fresh();
+    const cell = quadrantCells(
+      state.preset,
+      state.players.find((p) => p.id === state.turnOrder[0])!.quadrant,
+    )[0]!;
+    state = accept(state, { type: 'place_town_hall', cell });
+    reject(state, { type: 'attack', cell });
+    reject(state, { type: 'select_card', cardId: 'neutral-a', targets: {} });
+    reject(state, { type: 'end_turn' });
+  });
+  it('auto-places a random own cell on placement timeout', () => {
+    const state = fresh();
+    const player = state.players.find((p) => p.id === state.turn.playerId)!;
+    const result = applyCommand(
+      state,
+      null,
+      { type: 'timeout' },
+      state.turn.deadline,
+      defaultRegistry,
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const tower = result.state.towers.find((t) => t.ownerId === player.id)!;
+    expect(tower.type).toBe('town_hall');
+    expect(quadrantAt(state.preset, tower.cells[0]!)).toBe(player.quadrant);
+    expect(
+      result.state.players.find((p) => p.id === player.id)!.timedOutTurns,
+    ).toBe(1);
   });
 });
 
@@ -274,7 +381,7 @@ describe('actions and atomic rejection', () => {
       fallback: 'first_legal',
     });
     expect(enemyTargets).not.toContainEqual(closedCell);
-    state = chooseNeutral(state);
+    state = chooseNeutral(placeTownHalls(state));
     reject(state, { type: 'attack', cell: closedCell });
   });
   it('requires a card, the active actor, valid clock and exactly two actions', () => {

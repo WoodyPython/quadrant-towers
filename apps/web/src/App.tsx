@@ -67,10 +67,16 @@ function Help({ close }: { close: () => void }) {
           Two to four players. One quadrant each. Empty quadrants are closed.
           Keep at least one tower alive and finish with the most points.
         </p>
+        <h3>Placement</h3>
+        <p>
+          Before the match begins, each player places their Town Hall on an
+          empty cell in their own quadrant, one at a time in turn order.
+        </p>
         <h3>Your turn</h3>
         <p>
-          Choose one of three cards, take two actions, then end your turn. You
-          have 90 seconds total. Actions can repeat.
+          Choose one of three cards, then take two actions. Your turn ends
+          automatically after your second action. You have 90 seconds total.
+          Actions can repeat.
         </p>
         <dl>
           <dt>Build</dt>
@@ -118,7 +124,7 @@ function Help({ close }: { close: () => void }) {
         </p>
         <h3>Board controls</h3>
         <p>
-          Scroll or drag to pan. Use + and − to zoom, or My quadrant to return
+          Drag to pan. Scroll or pinch to zoom, or use My quadrant to return
           home. Arrow keys move between cells; Shift + arrows pan. Enter
           selects, Escape cancels.
         </p>
