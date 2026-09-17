@@ -74,6 +74,14 @@ test('four browsers restore their seats and private offers after graceful and ab
     for (const crash of [false, true]) {
       await stop(crash);
       await start();
+      // Every seat must finish rejoining before the test jumps past disconnect grace.
+      await expect
+        .poll(async () =>
+          (
+            await database!.pool.query('SELECT disconnected_at FROM players')
+          ).rows.every((player) => player.disconnected_at === null),
+        )
+        .toBe(true);
       const restored = await activePage(pages);
       expect(restored).toBe(active);
       await expect
@@ -100,12 +108,25 @@ test('four browsers restore their seats and private offers after graceful and ab
       ).toEqual(seats);
     }
     await chooseCard(active);
+    await expect(
+      active.getByRole('button', { name: 'Build', exact: true }),
+    ).toBeEnabled();
     const advanced = once(child!, 'message');
     child!.send('timeout');
     await advanced;
     await active.reload(); // rejoin observes and commits the overdue turn once
     await expect
-      .poll(async () => (await activePage(pages)) !== active)
+      .poll(async () => {
+        for (const page of pages)
+          if (
+            page !== active &&
+            (await page
+              .getByRole('heading', { name: 'Choose a card', exact: true })
+              .count())
+          )
+            return true;
+        return false;
+      })
       .toBe(true);
     expect(packetErrors).toEqual([]);
     for (let index = 0; index < pages.length; index++) {

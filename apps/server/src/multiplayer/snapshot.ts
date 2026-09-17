@@ -18,7 +18,8 @@ import {
 const n = z.number().int().nonnegative();
 const snapshotSchema = z.strictObject({
   id: z.uuid(),
-  phase: z.enum(['placement', 'battle']),
+  // Version 1 snapshots saved before manual placement were always in battle.
+  phase: z.enum(['placement', 'battle']).default('battle'),
   preset: presetSchema,
   cardCatalogVersion: idSchema,
   balanceVersion: idSchema,
@@ -98,6 +99,8 @@ export function parseSnapshot(
       ? new Set(state.turn.cardOffer).size === 3 &&
         state.turn.cardOffer.every((id) => cards.has(id))
       : state.turn.cardOffer.length === 0;
+  // A disconnect forfeit may be saved before an overdue turn is resolved.
+  // Recovery must be able to load that state and apply its pending timeout.
   if (
     ids.size !== state.players.length ||
     new Set(state.players.map((p) => p.quadrant)).size !==
@@ -112,7 +115,6 @@ export function parseSnapshot(
     (state.phase === 'placement' &&
       (state.turn.selectedCardId !== null ||
         state.turn.actionsRemaining !== 0)) ||
-    (!state.result && state.turn.deadline < state.lastCommandAt) ||
     (!state.result &&
       state.players.find((p) => p.id === state.turn.playerId)!.eliminated) ||
     new Set(state.towers.map((t) => t.id)).size !== state.towers.length

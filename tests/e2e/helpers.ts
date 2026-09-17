@@ -91,7 +91,29 @@ export async function startMatch(
     await expect(
       page.getByRole('region', { name: 'Game board' }),
     ).toBeVisible();
+  await placeTownHalls(pages);
   return { pages, contexts, views, packetErrors };
+}
+export async function placeTownHalls(pages: Page[]) {
+  for (let i = 0; i < pages.length; i++) {
+    let active: Page | undefined;
+    // Poll for an actual legal cell, not just the heading: right after a
+    // click the placer's own page still shows the heading for a moment
+    // while its legal-cell set has already gone empty (send() sets
+    // pending synchronously), which would otherwise pick the same page
+    // twice and hang waiting for a cell that will never appear.
+    await expect
+      .poll(async () => {
+        for (const page of pages)
+          if (await page.locator('[data-cell][data-legal="true"]').count()) {
+            active = page;
+            return true;
+          }
+        return false;
+      })
+      .toBe(true);
+    await active!.locator('[data-cell][data-legal="true"]').first().click();
+  }
 }
 export async function activePage(pages: Page[]) {
   let active: Page | undefined;
