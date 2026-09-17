@@ -1,5 +1,5 @@
 import { expect, test, type Locator } from '@playwright/test';
-import { startMatch } from './helpers.js';
+import { startMatch, activePage, chooseCard } from './helpers.js';
 
 async function anchor(viewport: Locator, offset: { x: number; y: number }) {
   return viewport.evaluate((el, offset) => {
@@ -18,6 +18,11 @@ test('wheel zoom preserves the cell under the cursor from a fitted board', async
 }) => {
   const { pages, contexts } = await startMatch(browser);
   try {
+    const active = await activePage(pages);
+    await chooseCard(active);
+    await expect(
+      active.getByRole('button', { name: 'Build', exact: true }),
+    ).toBeEnabled();
     const page = pages[0]!;
     await expect(page.getByRole('button', { name: 'Zoom in' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Zoom out' })).toHaveCount(0);
@@ -52,6 +57,11 @@ test('touch pinch preserves the cell beneath the gesture midpoint', async ({
 }) => {
   const { pages, contexts } = await startMatch(browser, 'Small', true);
   try {
+    const active = await activePage(pages);
+    await chooseCard(active);
+    await expect(
+      active.getByRole('button', { name: 'Build', exact: true }),
+    ).toBeEnabled();
     const page = pages[0]!;
     const viewport = page.locator('[class*="boardViewport"]');
     const bounds = (await viewport.boundingBox())!;
