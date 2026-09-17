@@ -1,4 +1,9 @@
-import { allCells, cellKey, occupiedCell, ownsCell } from '../board.js';
+import { rulesTextMatches } from './rules-text.js';
+import {
+  fallbackTargets,
+  targetCandidates,
+  validateTargets,
+} from './targets.js';
 import { PRESETS } from '../board.js';
 import { weighted } from '../random.js';
 import type {
@@ -24,7 +29,11 @@ export function describeEffects(
             ? `Restore ${effect.amount} health (up to 10).`
             : effect.type === 'reveal'
               ? 'Permanently reveal the selected cell.'
-              : `Prevent ${effect.amount} incoming damage.`;
+              : effect.type === 'prevent_damage'
+                ? `Prevent ${effect.amount} incoming damage.`
+                : 'amount' in effect
+                  ? `Apply ${effect.amount} ${effect.type}.`
+                  : `Apply ${effect.type}.`;
       return `${effect.trigger}: ${text}`;
     })
     .join(' ');
@@ -94,7 +103,10 @@ export function createRegistry(
       )
         throw new Error('Invalid card');
       ids.add(card.id);
-      if (card.description !== describeEffects(card))
+      if (
+        !card.description ||
+        (card.description !== describeEffects(card) && !rulesTextMatches(card))
+      )
         throw new Error('Card description does not match effects');
       if (
         card.charges !== undefined &&
@@ -125,6 +137,39 @@ export function createRegistry(
         targets.has('')
       )
         throw new Error('Invalid target IDs');
+      for (const target of card.targets) {
+        if (
+          target.timing !== 'on_selected' ||
+          target.fallback !== 'first_legal'
+        )
+          throw new Error('Invalid target timing/fallback');
+        if (
+          target.kind === 'enemy_rectangle' &&
+          (!Number.isInteger(target.size) ||
+            target.size! < 2 ||
+            target.size! > 5)
+        )
+          throw new Error('Invalid rectangle size');
+        if (
+          [
+            'own_towers',
+            'empty_own_cells',
+            'expansion_cells',
+            'connected_enemy_cells',
+          ].includes(target.kind) &&
+          (!Number.isInteger(target.count) ||
+            target.count! < 1 ||
+            target.count! > 3)
+        )
+          throw new Error('Invalid target count');
+        if (
+          target.kind === 'expansion_cells' &&
+          !card.targets.some(
+            (t) => t.id === target.towerTarget && t.kind === 'expandable_tower',
+          )
+        )
+          throw new Error('Invalid expansion target');
+      }
       for (const rule of card.eligibility) {
         const value = rule.type === 'minimum_round' ? rule.round : rule.health;
         if (
@@ -140,6 +185,42 @@ export function createRegistry(
           (!Number.isInteger(effect.amount) || effect.amount < 1)
         )
           throw new Error('Invalid effect amount');
+        if (
+          effect.type === 'build_free' &&
+          (!Number.isInteger(effect.health) ||
+            effect.health < 1 ||
+            effect.health > 10)
+        )
+          throw new Error('Invalid build health');
+        if (
+          effect.type === 'expand_free' &&
+          !card.targets.some(
+            (t) => t.id === effect.cellsTarget && t.kind === 'expansion_cells',
+          )
+        )
+          throw new Error('Invalid expansion cells');
+        if (
+          (effect.type === 'area_damage' ||
+            (effect.type === 'reveal' && effect.mode === 'rectangle')) &&
+          (!Number.isInteger(effect.size) ||
+            effect.size! < 2 ||
+            effect.size! > 5 ||
+            !card.targets.some(
+              (t) =>
+                t.id === effect.target &&
+                t.kind === 'enemy_rectangle' &&
+                t.size === effect.size,
+            ))
+        )
+          throw new Error('Invalid rectangle effect');
+        if (
+          effect.type === 'modifier' &&
+          ['shield', 'invulnerable', 'free_expand', 'target_bonus'].includes(
+            effect.kind,
+          ) &&
+          !effect.target
+        )
+          throw new Error('Modifier requires target');
         if ('target' in effect) {
           if (effect.target === 'event_tower') {
             if (
@@ -153,8 +234,36 @@ export function createRegistry(
             const target = card.targets.find((t) => t.id === effect.target);
             if (
               !target ||
-              (effect.type === 'heal' && !target.kind.endsWith('own_tower')) ||
-              (effect.type === 'reveal' && !target.kind.endsWith('enemy_cell'))
+              (effect.type === 'damage' &&
+                target.kind !== 'revealed_enemy_tower') ||
+              (effect.type === 'build_free' &&
+                target.kind !== 'empty_own_cells') ||
+              (effect.type === 'expand_free' &&
+                target.kind !== 'expandable_tower') ||
+              (effect.type === 'area_damage' &&
+                target.kind !== 'enemy_rectangle') ||
+              (effect.type === 'modifier' &&
+                effect.kind === 'target_bonus' &&
+                target.kind !== 'revealed_enemy_tower') ||
+              (effect.type === 'modifier' &&
+                ['shield', 'invulnerable'].includes(effect.kind) &&
+                target.kind !== 'own_tower') ||
+              (effect.type === 'modifier' &&
+                effect.kind === 'free_expand' &&
+                target.kind !== 'expandable_tower') ||
+              (effect.type === 'heal' &&
+                ![
+                  'own_tower',
+                  'damaged_own_tower',
+                  'one_health_tower',
+                  'expandable_tower',
+                  'own_towers',
+                ].includes(target.kind)) ||
+              (effect.type === 'reveal' &&
+                !target.kind.startsWith('enemy_') &&
+                !['hidden_enemy_cell', 'connected_enemy_cells'].includes(
+                  target.kind,
+                ))
             )
               throw new Error('Effect target type mismatch');
           }
@@ -210,26 +319,9 @@ export function legalTargets(
   state: MatchState,
   playerId: string,
   target: TargetDefinition,
+  selected: Record<string, TargetValue> = {},
 ): TargetValue[] {
-  const player = state.players.find((p) => p.id === playerId);
-  if (!player || player.eliminated) return [];
-  if (target.kind === 'own_tower' || target.kind === 'damaged_own_tower') {
-    return state.towers
-      .filter(
-        (t) =>
-          t.ownerId === playerId &&
-          (target.kind === 'own_tower' || t.health < 10),
-      )
-      .map((t) => t.id)
-      .sort();
-  }
-  return allCells(state.preset).filter(
-    (cell) =>
-      !ownsCell(state, player, cell) &&
-      occupiedCell(state, cell) &&
-      (target.kind === 'enemy_cell' ||
-        !player.revealed.includes(cellKey(cell))),
-  );
+  return targetCandidates(state, playerId, target, selected);
 }
 export function selectable(
   state: MatchState,
@@ -256,8 +348,11 @@ export function selectable(
             (t) => t.ownerId === playerId && t.health < rule.health,
           ),
     ) &&
-    card.targets.every(
-      (target) => legalTargets(state, playerId, target).length > 0,
+    validateTargets(
+      state,
+      playerId,
+      card,
+      fallbackTargets(state, playerId, card),
     )
   );
 }
@@ -310,7 +405,12 @@ export function generateOffer(
         chosen = weighted(
           cursor,
           eligible
-            .filter((c) => c.rarityId === tier.id && !cardIds.includes(c.id))
+            .filter(
+              (c) =>
+                !c.fallbackOnly &&
+                c.rarityId === tier.id &&
+                !cardIds.includes(c.id),
+            )
             .map((c) => ({ value: c, weight: c.offerWeight })),
         );
         if (chosen) break;

@@ -12,19 +12,7 @@ async function enter(locator: Locator) {
   await locator.press('Enter');
 }
 async function keyboardCard(page: Page) {
-  await enter(
-    page
-      .getByRole('button')
-      .filter({ hasText: /Consumable|Passive/ })
-      .first(),
-  );
-  const play = page.getByRole('button', { name: /^Play / });
-  if (!(await play.isEnabled()))
-    await enter(page.locator('[data-cell][data-legal="true"]').first());
-  await enter(play);
-  await expect(
-    page.getByRole('heading', { name: 'Your actions' }),
-  ).toBeVisible();
+  await chooseCard(page, true);
 }
 
 test('keyboard-only card selection and all four action types', async ({
@@ -88,21 +76,26 @@ test('players can be eliminated, reconnect, and finish by last survivor', async 
         await neutral.click();
         await active.getByRole('button', { name: /^Play / }).click();
       } else await chooseCard(active);
+      if (await active.getByRole('heading', { name: /wins$/ }).count()) break;
       await expect(
-        active.getByRole('heading', { name: 'Your actions' }),
+        active.getByRole('heading', { name: 'Your actions', exact: true }),
       ).toBeVisible();
-      for (let action = 0; action < 2; action++) {
+      while (
+        await active
+          .getByRole('heading', { name: 'Your actions', exact: true })
+          .count()
+      ) {
         if (await active.getByRole('heading', { name: /wins$/ }).count()) break;
         // Find a surviving target using its own visible board, not opponent payloads.
         let victim = -1;
         for (let i = 0; i < pages.length; i++) {
-          if (pages[i] === active || !halls[i]) continue;
-          if (
-            await pages[i]!.locator(`[data-cell="${halls[i]}"]`)
-              .getAttribute('aria-label')
-              .then((label) => label?.includes('Town Hall'))
-          ) {
+          if (pages[i] === active) continue;
+          const owned = pages[i]!.locator(`[data-cell][data-player="${i}"]`)
+            .filter({ has: pages[i]!.locator('[class*="piece"]') })
+            .first();
+          if (await owned.count()) {
             victim = i;
+            halls[i] = await owned.getAttribute('data-cell');
             break;
           }
         }
@@ -114,21 +107,28 @@ test('players can be eliminated, reconnect, and finish by last survivor', async 
         await active
           .getByRole('button', { name: /^Attack [A-Z]+\d+$/ })
           .click();
-        // The second action ends the turn automatically, so watch for the
-        // turn passing on (or the match ending) rather than the transient
-        // "0 actions remaining" state.
         await expect
-          .poll(async () => {
-            if (
-              (await active.getByRole('heading', { name: /wins$/ }).count()) > 0
-            )
-              return true;
-            return action === 0
-              ? (await active.getByLabel('1 actions remaining').count()) > 0
-              : (await active
-                  .getByRole('heading', { name: 'Waiting for your turn' })
-                  .count()) > 0;
-          })
+          .poll(
+            async () =>
+              (await active.getByRole('heading', { name: /wins$/ }).count()) >
+                0 ||
+              (await active
+                .getByRole('button', { name: 'Attack', exact: true })
+                .getAttribute('aria-pressed', { timeout: 1000 })
+                .catch(() => null)) === 'false',
+          )
+          .toBe(true);
+        await expect
+          .poll(
+            async () =>
+              !(await active
+                .getByRole('heading', { name: 'Your actions', exact: true })
+                .count()) ||
+              (await active
+                .getByRole('button', { name: 'Attack', exact: true })
+                .isEnabled({ timeout: 1000 })
+                .catch(() => false)),
+          )
           .toBe(true);
         const eliminated = pages[victim]!.getByRole('heading', {
           name: /eliminated/,

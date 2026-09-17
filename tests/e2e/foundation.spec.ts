@@ -184,23 +184,49 @@ for (const [preset, rounds, cells] of [
           refreshed = true;
         }
         await chooseCard(page);
-        for (let action = 0; action < 2; action++) {
+        let operation = 0;
+        while (
           await page
-            .getByRole('button', {
-              name: turn === 0 && action === 0 ? 'Expand' : 'Build',
-              exact: true,
-            })
-            .click();
-          if (turn === 0 && action === 0)
+            .getByRole('heading', { name: 'Your actions', exact: true })
+            .count()
+        ) {
+          const free = await page
+            .getByRole('status')
+            .filter({ hasText: /free Attack/ })
+            .count();
+          const action = free
+            ? 'Attack'
+            : turn === 0 && operation === 0
+              ? 'Expand'
+              : 'Build';
+          await page.getByRole('button', { name: action, exact: true }).click();
+          if (action === 'Expand')
             await page
               .locator('[data-cell][data-legal="true"]')
               .first()
               .click();
           await page.locator('[data-cell][data-legal="true"]').first().click();
-          // The second action ends the turn automatically; only the first
-          // action's remaining count is stable enough to assert on.
-          if (action === 0)
-            await expect(page.getByLabel('1 actions remaining')).toBeVisible();
+          if (action === 'Attack')
+            await page
+              .getByRole('button', { name: /^Attack [A-Z]+\d+$/ })
+              .click();
+          // Wait for the accepted operation, including zero-cost modifiers.
+          await expect(
+            page.getByRole('button', { name: action, exact: true }),
+          ).toHaveAttribute('aria-pressed', 'false');
+          await expect
+            .poll(
+              async () =>
+                !(await page
+                  .getByRole('heading', { name: 'Your actions', exact: true })
+                  .count()) ||
+                (await page
+                  .getByRole('button', { name: 'Attack', exact: true })
+                  .isEnabled({ timeout: 1000 })
+                  .catch(() => false)),
+            )
+            .toBe(true);
+          operation++;
         }
       }
       for (const page of pages) {

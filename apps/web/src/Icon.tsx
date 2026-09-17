@@ -18,6 +18,7 @@ export function Icon({ name, size = 22 }: { name: string; size?: number }) {
     eye: 'M2 12C7 3 17 3 22 12C17 21 7 21 2 12ZM15 12A3 3 0 1 1 9 12A3 3 0 1 1 15 12',
     star: 'M12 2L15 8L22 9L17 14L18 21L12 18L6 21L7 14L2 9L9 8Z',
     circle: 'M18 12A6 6 0 1 1 6 12A6 6 0 1 1 18 12',
+    crown: 'M3 6L7 10L12 3L17 10L21 6L19 19H5ZM5 22H19',
     diamond: 'M12 3L21 12L12 21L3 12Z',
     square: 'M5 5H19V19H5Z',
     triangle: 'M12 3L22 21H2Z',

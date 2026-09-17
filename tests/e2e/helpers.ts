@@ -92,6 +92,12 @@ export async function startMatch(
       page.getByRole('region', { name: 'Game board' }),
     ).toBeVisible();
   await placeTownHalls(pages);
+  const active = await activePage(pages);
+  const offers = active
+    .getByRole('button')
+    .filter({ hasText: /Consumable|Passive/ });
+  await expect(offers).toHaveCount(3);
+  await expect(offers.first()).toBeEnabled();
   return { pages, contexts, views, packetErrors };
 }
 export async function placeTownHalls(pages: Page[]) {
@@ -133,16 +139,40 @@ export async function activePage(pages: Page[]) {
     .toBe(true);
   return active!;
 }
-export async function chooseCard(page: Page) {
+export async function chooseCard(page: Page, keyboard = false) {
   const cards = page
     .getByRole('button')
     .filter({ hasText: /Consumable|Passive/ });
-  await cards.first().click();
+  const steady = cards
+    .filter({
+      hasText:
+        /Drone|Rangefinder|Surveyor|Recon|Satellite|Surveillance|All-Seeing|Intelligence|Repairs|Repair Crew|Fortress|Patch|Walls|Barricade|Impenetrable|Fortification|Reinforcement|Phoenix|Foundations|Momentum|Ambush|Weak Point|Focused Fire|Blitzkrieg|Counterintelligence|Forward Base|Rapid Construction|Infrastructure|Rapid Expansion|Engineering Crew|Double Expansion|Master Architect|Ascension|Precision|Artillery|Air Strike|Cataclysm|Neutral/,
+    })
+    .first();
+  const pick = (await steady.count()) ? steady : cards.first();
+  if (keyboard) {
+    await pick.focus();
+    await pick.press('Enter');
+  } else await pick.click();
   const play = page.getByRole('button', { name: /^Play / });
-  if (!(await play.isEnabled()))
-    await page.locator('[data-cell][data-legal="true"]').first().click();
-  await play.click();
-  await expect(
-    page.getByRole('heading', { name: 'Your actions' }),
-  ).toBeVisible();
+  while (!(await play.isEnabled())) {
+    const cell = page.locator('[data-cell][data-legal="true"]').first();
+    if (keyboard) {
+      await cell.focus();
+      await cell.press('Enter');
+    } else await cell.click({ timeout: 10000 });
+  }
+  if (keyboard) {
+    await play.focus();
+    await play.press('Enter');
+  } else await play.click();
+  await expect
+    .poll(
+      async () =>
+        (await page
+          .getByRole('heading', { name: 'Your actions', exact: true })
+          .count()) > 0 ||
+        (await page.getByRole('heading', { name: /wins$/ }).count()) > 0,
+    )
+    .toBe(true);
 }

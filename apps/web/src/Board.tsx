@@ -94,6 +94,7 @@ export const Board = memo(function Board({
   playerId,
   legal,
   selected,
+  preview = new Set<string>(),
   onSelect,
 }: {
   view: MatchView;
@@ -101,6 +102,7 @@ export const Board = memo(function Board({
   playerId: string;
   legal: Set<string>;
   selected: Point | null;
+  preview?: Set<string>;
   onSelect: (p: Point) => void;
 }) {
   const viewport = useRef<HTMLDivElement>(null);
@@ -490,7 +492,10 @@ export const Board = memo(function Board({
                     edge={`${c.cell.x === size / 2 ? 'left ' : ''}${c.cell.y === size / 2 ? 'top' : ''}`}
                     joined={joined}
                     legal={legal.has(key(c.cell))}
-                    selected={!!selected && key(selected) === key(c.cell)}
+                    selected={
+                      preview.has(key(c.cell)) ||
+                      (!!selected && key(selected) === key(c.cell))
+                    }
                     focused={key(focused) === key(c.cell)}
                     unavailable={unavailable}
                     onSelect={pick}
