@@ -7,6 +7,12 @@ export const cellSchema = z.strictObject({
   x: integer.max(27),
   y: integer.max(27),
 });
+export const targetValueSchema = z.union([
+  cellSchema,
+  idSchema,
+  z.array(cellSchema).min(1).max(3),
+  z.array(idSchema).min(1).max(3),
+]);
 const nameSchema = z
   .string()
   .transform((s) => s.normalize('NFKC').trim())
@@ -51,7 +57,7 @@ export const requestSchemas = {
     ...mutation,
     cardId: idSchema,
     targets: z
-      .record(idSchema, z.union([cellSchema, idSchema]))
+      .record(idSchema, targetValueSchema)
       .refine((v) => Object.keys(v).length <= 16),
   }),
   'action:submit': z.strictObject({ ...mutation, action: actionSchema }),
@@ -112,11 +118,13 @@ export const effectViewSchema = z.strictObject({
   cardId: idSchema,
   cardVersion: integer,
   ownerId: idSchema,
-  targets: z.record(z.string(), z.union([cellSchema, idSchema])).optional(),
+  targets: z.record(z.string(), targetValueSchema).optional(),
   remainingCharges: integer.nullable().optional(),
   expiresTurn: integer.nullable().optional(),
   expiresOwnerTurn: integer.nullable().optional(),
   expiresRound: integer.nullable().optional(),
+  shieldRemaining: integer.max(2).optional(),
+  hitTowerIds: z.array(idSchema).optional(),
 });
 export const historySchema = z.array(
   z.strictObject({
@@ -127,6 +135,7 @@ export const historySchema = z.array(
       'town_hall_placed',
       'card_offer',
       'card_selected',
+      'damage_resolved',
       'effect_triggered',
       'effect_expired',
       'turn_started',
@@ -167,7 +176,8 @@ export const matchViewSchema = z.strictObject({
     number: integer,
     round: integer,
     deadline: integer,
-    actionsRemaining: integer.max(2),
+    actionsRemaining: integer.max(4),
+    freeAttacksAvailable: integer.max(2).optional(),
     cardOffer: z.array(idSchema).max(3).optional(),
     selectedCardId: idSchema.nullable().optional(),
   }),
@@ -212,8 +222,21 @@ export const contentSchema = z.strictObject({
             'damaged_own_tower',
             'enemy_cell',
             'hidden_enemy_cell',
+            'one_health_tower',
+            'expandable_tower',
+            'revealed_enemy_tower',
+            'own_towers',
+            'enemy_rectangle',
+            'connected_enemy_cells',
+            'empty_own_cells',
+            'expansion_cells',
+            'enemy_quadrant',
+            'enemy_row_column',
           ]),
           timing: z.literal('on_selected'),
+          size: integer.min(2).max(5).optional(),
+          count: integer.min(1).max(3).optional(),
+          towerTarget: idSchema.optional(),
         }),
       ),
     }),

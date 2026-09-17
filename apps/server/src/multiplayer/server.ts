@@ -151,8 +151,8 @@ export class Multiplayer {
     this.store = options.store;
     this.registry = options.store.registry;
     this.clock = options.clock ?? systemClock;
-    this.catalogVersion = options.catalogVersion ?? 'framework-1';
-    this.balanceVersion = options.balanceVersion ?? 'framework-1';
+    this.catalogVersion = options.catalogVersion ?? 'launch-2';
+    this.balanceVersion = options.balanceVersion ?? 'launch-2';
     this.io = new Server(options.httpServer, {
       maxHttpBufferSize: 16 * 1024,
       cors: { origin: options.origins, methods: ['GET', 'POST'] },
@@ -395,6 +395,9 @@ export class Multiplayer {
             id: t.id,
             kind: t.kind,
             timing: t.timing,
+            size: t.size,
+            count: t.count,
+            towerTarget: t.towerTarget,
           })),
         }),
       ),

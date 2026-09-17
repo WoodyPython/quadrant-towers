@@ -58,6 +58,7 @@ export function projectMatch(state: MatchState, playerId: string) {
       round: state.turn.round,
       deadline: state.turn.deadline,
       actionsRemaining: state.turn.actionsRemaining,
+      freeAttacksAvailable: state.turn.freeAttacksAvailable,
       ...(ended || state.turn.playerId === playerId
         ? {
             cardOffer: [...state.turn.cardOffer],
@@ -82,13 +83,17 @@ export function projectMatch(state: MatchState, playerId: string) {
               expiresTurn: effect.expiresTurn,
               expiresOwnerTurn: effect.expiresOwnerTurn,
               expiresRound: effect.expiresRound,
+              shieldRemaining: effect.shieldRemaining,
+              hitTowerIds: effect.hitTowerIds,
             }
           : {}),
       })),
     history: state.history
       .filter(
         (entry) =>
-          ended || entry.type !== 'card_offer' || entry.playerId === playerId,
+          ended ||
+          !['card_offer', 'damage_resolved'].includes(entry.type) ||
+          entry.playerId === playerId,
       )
       .filter(
         (entry) =>

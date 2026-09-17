@@ -74,8 +74,9 @@ function Help({ close }: { close: () => void }) {
         </p>
         <h3>Your turn</h3>
         <p>
-          Choose one of three cards, then take two actions. Your turn ends
-          automatically after your second action. You have 90 seconds total.
+          Choose one of three cards, then take two actions. Cards may grant
+          extra actions or free operations. Your turn ends automatically after
+          all actions and free Attacks are used. You have 90 seconds total.
           Actions can repeat.
         </p>
         <dl>

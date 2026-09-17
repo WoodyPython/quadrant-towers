@@ -14,11 +14,12 @@ const environment = parseEnvironment({
   LOG_LEVEL: 'silent',
   RATE_LIMITS: 'false',
 });
+const store = new Store(database.pool, defaultRegistry);
 const app = await buildApp({
   environment,
   ready: database.ready,
   closeDatabase: database.close,
-  store: new Store(database.pool, defaultRegistry),
+  store,
   staticRoot: fileURLToPath(new URL('../../apps/web/dist/', import.meta.url)),
   clock: {
     now: () => Date.now() + offset,
@@ -38,6 +39,27 @@ process.on('message', async (message) => {
   if (message === 'close') {
     await app.close();
     process.exit(0);
+  }
+  if (
+    message &&
+    typeof message === 'object' &&
+    message.type === 'ability_fixture'
+  ) {
+    const roomId = await store.find(message.code);
+    const saved = await store.transaction(roomId, async (aggregate) => {
+      const state = aggregate.state;
+      state.turn.cardOffer = message.cardIds;
+      state.turn.selectedCardId = null;
+      state.turn.actionsRemaining = 2;
+      state.turn.freeAttacksAvailable = 0;
+      state.turn.normalActionsTaken = 0;
+      state.turn.round = message.round ?? state.turn.round;
+      state.turn.deadline = Date.now() + offset + 90000;
+      state.effects = [];
+      state.version++;
+      return { value: state.turn.playerId, write: {} };
+    });
+    process.send({ fixtureReady: true, actorId: saved.value });
   }
   if (message === 'timeout') {
     offset += 91_000;

@@ -161,6 +161,7 @@ export function eventText(
     expand: 'expanded a tower',
     attack: 'attacked',
     card_selected: 'chose a card',
+    damage_resolved: 'dealt damage',
     effect_triggered: 'triggered an effect',
     effect_expired: 'had an effect expire',
     eliminated: 'was eliminated',
@@ -172,6 +173,17 @@ export function eventText(
     card_offer: 'received three cards',
   };
   let text = `${name} ${actionNames[entry.type] ?? 'played'}`;
+  if (
+    entry.type === 'damage_resolved' &&
+    typeof details?.damage === 'number' &&
+    Number.isInteger(details.damage) &&
+    details.damage >= 0
+  ) {
+    text =
+      details.damage === 0
+        ? `${name} · Damage prevented`
+        : `${name} dealt ${details.damage} damage${details.destroyed ? ' · Tower destroyed' : ''}`;
+  }
   if (entry.type === 'card_selected' && typeof details?.cardId === 'string')
     text = `${name} chose ${cards.get(details.cardId) ?? 'a card'}`;
   if (
@@ -221,4 +233,189 @@ export function eventText(
   if (entry.type === 'turn_started' && typeof details?.round === 'number')
     text += ` · round ${details.round}`;
   return text;
+}
+
+export type CardTarget =
+  import('@quadrant/protocol').Requests['card:choose']['targets'][string];
+export type TargetDefinition = NonNullable<
+  Extract<import('@quadrant/protocol').Ack, { ok: true }>['content']
+>['cards'][number]['targets'][number];
+const point = (v: unknown): v is Point =>
+  !!v && typeof v === 'object' && !Array.isArray(v) && 'x' in v && 'y' in v;
+const touching = (a: Point, b: Point) =>
+  Math.abs(a.x - b.x) + Math.abs(a.y - b.y) === 1;
+export const multiTarget = (target: TargetDefinition) =>
+  [
+    'own_towers',
+    'empty_own_cells',
+    'expansion_cells',
+    'connected_enemy_cells',
+  ].includes(target.kind);
+export function cardTargetsFor(
+  view: MatchView,
+  playerId: string,
+  target: TargetDefinition,
+  selected: Record<string, CardTarget>,
+): Set<string> {
+  const value = selected[target.id];
+  const picked = Array.isArray(value) ? value : [];
+  const pickedPoints = picked.filter(point);
+  const towerId = selected[target.towerTarget ?? 'tower'];
+  const footprint = view.cells
+    .filter((c) => c.visibility === 'visible' && c.tower?.id === towerId)
+    .map((c) => c.cell);
+  const empty = targetsFor(view, playerId, 'build');
+  const basic = targetsFor(view, playerId, target.kind);
+  return new Set(
+    view.cells
+      .filter((c) => {
+        const own = isOwn(view, playerId, c.cell),
+          tower = c.visibility === 'visible' ? c.tower : null;
+        if (!isAvailable(view, c.cell)) return false;
+        if (
+          picked.some((x) =>
+            typeof x === 'string'
+              ? x === tower?.id
+              : point(x) && key(x) === key(c.cell),
+          )
+        )
+          return false;
+        switch (target.kind) {
+          case 'own_tower':
+          case 'damaged_own_tower':
+          case 'enemy_cell':
+          case 'hidden_enemy_cell':
+            return basic.has(key(c.cell));
+          case 'one_health_tower':
+            return own && tower?.health === 1;
+          case 'expandable_tower':
+            return (
+              own &&
+              !!tower &&
+              view.cells.some(
+                (x) =>
+                  empty.has(key(x.cell)) &&
+                  view.cells.some(
+                    (f) =>
+                      f.visibility === 'visible' &&
+                      f.tower?.id === tower.id &&
+                      touching(f.cell, x.cell),
+                  ),
+              )
+            );
+          case 'revealed_enemy_tower':
+            return !own && !!tower;
+          case 'own_towers':
+            return own && !!tower && tower.health < 10;
+          case 'empty_own_cells':
+            return empty.has(key(c.cell));
+          case 'expansion_cells':
+            return (
+              empty.has(key(c.cell)) &&
+              [...footprint, ...pickedPoints].some((x) => touching(x, c.cell))
+            );
+          case 'connected_enemy_cells':
+            return (
+              !own &&
+              (!pickedPoints.length ||
+                pickedPoints.some((x) => touching(x, c.cell)))
+            );
+          case 'enemy_row_column':
+            return !own;
+          case 'enemy_rectangle': {
+            const size = target.size!,
+              q = quadrant(c.cell, view.dimensions.quadrantSize);
+            return (
+              !own &&
+              quadrant(
+                { x: c.cell.x + size - 1, y: c.cell.y + size - 1 },
+                view.dimensions.quadrantSize,
+              ) === q &&
+              c.cell.x + size <= view.dimensions.boardSize &&
+              c.cell.y + size <= view.dimensions.boardSize
+            );
+          }
+          case 'enemy_quadrant': {
+            const enemy = view.players.find(
+              (p) =>
+                p.quadrant === quadrant(c.cell, view.dimensions.quadrantSize),
+            );
+            return (
+              !own &&
+              !!enemy &&
+              !enemy.eliminated &&
+              view.cells.some(
+                (x) =>
+                  quadrant(x.cell, view.dimensions.quadrantSize) ===
+                    enemy.quadrant && x.visibility === 'hidden',
+              )
+            );
+          }
+        }
+      })
+      .map((c) => key(c.cell)),
+  );
+}
+export function targetComplete(
+  view: MatchView,
+  playerId: string,
+  target: TargetDefinition,
+  selected: Record<string, CardTarget>,
+): boolean {
+  const value = selected[target.id];
+  if (!multiTarget(target)) return value !== undefined;
+  if (!Array.isArray(value) || !value.length) return false;
+  if (value.length === target.count) return true;
+  if (target.kind === 'own_towers' || target.kind === 'expansion_cells')
+    return cardTargetsFor(view, playerId, target, selected).size === 0;
+  return false;
+}
+export function cardPreview(
+  view: MatchView,
+  targets: TargetDefinition[],
+  selected: Record<string, CardTarget>,
+): Set<string> {
+  const preview = new Set<string>();
+  for (const target of targets) {
+    const value = selected[target.id];
+    if (Array.isArray(value))
+      for (const v of value) {
+        if (point(v)) preview.add(key(v));
+        else
+          for (const c of view.cells)
+            if (c.visibility === 'visible' && c.tower?.id === v)
+              preview.add(key(c.cell));
+      }
+    else if (point(value)) {
+      for (const c of view.cells) {
+        const same =
+          quadrant(c.cell, view.dimensions.quadrantSize) ===
+          quadrant(value, view.dimensions.quadrantSize);
+        if (
+          target.kind === 'enemy_rectangle' &&
+          c.cell.x >= value.x &&
+          c.cell.x < value.x + target.size! &&
+          c.cell.y >= value.y &&
+          c.cell.y < value.y + target.size!
+        )
+          preview.add(key(c.cell));
+        else if (
+          target.kind === 'enemy_row_column' &&
+          same &&
+          (c.cell.x === value.x || c.cell.y === value.y)
+        )
+          preview.add(key(c.cell));
+      }
+      preview.add(key(value));
+    } else if (typeof value === 'string')
+      for (const c of view.cells)
+        if (
+          (c.visibility === 'visible' && c.tower?.id === value) ||
+          (target.kind === 'enemy_quadrant' &&
+            quadrant(c.cell, view.dimensions.quadrantSize) ===
+              view.players.find((p) => p.id === value)?.quadrant)
+        )
+          preview.add(key(c.cell));
+  }
+  return preview;
 }

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   cellSchema,
+  targetValueSchema,
   idSchema,
   presetSchema,
   resultSchema,
@@ -58,19 +59,23 @@ const snapshotSchema = z.strictObject({
       cardId: idSchema,
       cardVersion: n,
       ownerId: z.uuid(),
-      targets: z.record(z.string(), z.union([cellSchema, idSchema])),
+      targets: z.record(z.string(), targetValueSchema),
       revealed: z.boolean(),
       remainingCharges: n.nullable(),
       expiresTurn: n.nullable(),
       expiresOwnerTurn: n.nullable(),
       expiresRound: n.nullable(),
+      shieldRemaining: n.max(2).optional(),
+      hitTowerIds: z.array(idSchema).optional(),
     }),
   ),
   turn: z.strictObject({
     playerId: z.uuid(),
     number: n,
     round: n.min(1),
-    actionsRemaining: n.max(2),
+    actionsRemaining: n.max(4),
+    freeAttacksAvailable: n.max(2).optional(),
+    normalActionsTaken: n.max(6).optional(),
     cardOffer: z.array(idSchema),
     selectedCardId: idSchema.nullable(),
     deadline: n,
@@ -168,9 +173,39 @@ export function parseSnapshot(
       !ids.has(effect.ownerId)
     )
       throw new Error('Invalid effect content');
+    const shield = card.effects.find(
+      (e) => e.type === 'modifier' && e.kind === 'shield',
+    );
+    if (
+      shield?.type === 'modifier' &&
+      (effect.shieldRemaining === undefined ||
+        effect.shieldRemaining < 1 ||
+        effect.shieldRemaining > shield.amount)
+    )
+      throw new Error('Invalid shield pool');
+    if (
+      card.charges !== undefined &&
+      effect.remainingCharges !== null &&
+      effect.remainingCharges > card.charges
+    )
+      throw new Error('Invalid remaining charges');
+    if (
+      effect.hitTowerIds &&
+      new Set(effect.hitTowerIds).size !== effect.hitTowerIds.length
+    )
+      throw new Error('Duplicate hit tracking');
+    if (Object.keys(effect.targets).length !== card.targets.length)
+      throw new Error('Invalid effect targets');
     for (const target of card.targets) {
       const value = effect.targets[target.id];
-      if (target.kind === 'own_tower' || target.kind === 'damaged_own_tower') {
+      if (
+        [
+          'own_tower',
+          'damaged_own_tower',
+          'expandable_tower',
+          'one_health_tower',
+        ].includes(target.kind)
+      ) {
         if (
           typeof value !== 'string' ||
           !state.towers.some(
@@ -178,9 +213,18 @@ export function parseSnapshot(
           )
         )
           throw new Error('Invalid effect target');
+      } else if (target.kind === 'revealed_enemy_tower') {
+        if (
+          typeof value !== 'string' ||
+          !state.towers.some(
+            (t) => t.id === value && t.ownerId !== effect.ownerId,
+          )
+        )
+          throw new Error('Invalid effect target');
       } else if (
         !value ||
         typeof value === 'string' ||
+        Array.isArray(value) ||
         !inBounds(state.preset, value)
       )
         throw new Error('Invalid effect target');

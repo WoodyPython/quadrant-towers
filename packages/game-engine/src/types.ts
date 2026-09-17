@@ -37,14 +37,59 @@ export type Command =
   | { type: 'end_turn' }
   | { type: 'timeout' }
   | { type: 'forfeit'; playerId: string };
-export type TargetValue = Cell | string;
+export type TargetValue = Cell | string | Cell[] | string[];
 export type Trigger =
   | 'on_selected'
   | 'before_attack'
   | 'after_damage'
   | 'on_build'
-  | 'on_turn_start';
+  | 'on_turn_start'
+  | 'on_action';
+export type ModifierKind =
+  | 'shield'
+  | 'invulnerable'
+  | 'phoenix'
+  | 'free_expand'
+  | 'free_build_expand'
+  | 'build_health'
+  | 'momentum'
+  | 'spotter'
+  | 'attack_bonus'
+  | 'target_bonus'
+  | 'focused_fire'
+  | 'destroy_attack'
+  | 'counterintelligence';
 export type EffectDefinition =
+  | {
+      type: 'modifier';
+      trigger: 'on_action';
+      kind: ModifierKind;
+      amount: number;
+      target?: string;
+    }
+  | { type: 'extra_actions'; trigger: 'on_selected'; amount: number }
+  | { type: 'damage'; trigger: 'on_selected'; amount: number; target: string }
+  | {
+      type: 'area_damage';
+      trigger: 'on_selected';
+      amount: number;
+      target: string;
+      size: number;
+    }
+  | {
+      type: 'build_free';
+      trigger: 'on_selected';
+      health: number;
+      target: string;
+    }
+  | {
+      type: 'expand_free';
+      trigger: 'on_selected';
+      target: string;
+      cellsTarget: string;
+    }
+  | { type: 'heal_all'; trigger: 'on_selected'; amount: number }
+  | { type: 'random_reveal'; trigger: 'on_selected'; amount: number }
   | { type: 'neutral'; trigger: Trigger }
   | {
       type: 'heal';
@@ -52,16 +97,40 @@ export type EffectDefinition =
       amount: number;
       target: string | 'event_tower';
     }
-  | { type: 'reveal'; trigger: Trigger; target: string }
+  | {
+      type: 'reveal';
+      trigger: Trigger;
+      target: string;
+      mode?: 'rectangle' | 'neighbors_if_occupied' | 'row_column' | 'quadrant';
+      size?: number;
+    }
   | { type: 'prevent_damage'; trigger: 'before_attack'; amount: number };
 export type DurationDefinition =
   | { type: 'this_turn' }
+  | { type: 'until_owner_next_turn' }
   | { type: 'owner_turns'; count: number }
   | { type: 'rounds'; count: number }
   | { type: 'match' };
 export interface TargetDefinition {
   id: string;
-  kind: 'own_tower' | 'damaged_own_tower' | 'enemy_cell' | 'hidden_enemy_cell';
+  kind:
+    | 'own_tower'
+    | 'damaged_own_tower'
+    | 'one_health_tower'
+    | 'expandable_tower'
+    | 'revealed_enemy_tower'
+    | 'own_towers'
+    | 'enemy_cell'
+    | 'hidden_enemy_cell'
+    | 'enemy_rectangle'
+    | 'connected_enemy_cells'
+    | 'empty_own_cells'
+    | 'expansion_cells'
+    | 'enemy_quadrant'
+    | 'enemy_row_column';
+  size?: number;
+  count?: number;
+  towerTarget?: string;
   timing: 'on_selected';
   fallback: 'first_legal';
 }
@@ -84,6 +153,7 @@ export interface AbilityCardDefinition {
   stacking: 'replace' | 'refresh' | 'stack' | 'unique';
   visibility: 'public' | 'owner_until_triggered';
   offerWeight: number;
+  fallbackOnly?: boolean;
   perMatchLimit?: number;
   artKey: string;
 }
@@ -120,12 +190,16 @@ export interface ActiveEffect {
   expiresTurn: number | null;
   expiresOwnerTurn: number | null;
   expiresRound: number | null;
+  shieldRemaining?: number | undefined;
+  hitTowerIds?: string[] | undefined;
 }
 export interface Turn {
   playerId: string;
   number: number;
   round: number;
   actionsRemaining: number;
+  freeAttacksAvailable?: number | undefined;
+  normalActionsTaken?: number | undefined;
   cardOffer: string[];
   selectedCardId: string | null;
   deadline: number;
@@ -138,6 +212,7 @@ export interface GameEvent {
     | 'town_hall_placed'
     | 'card_offer'
     | 'card_selected'
+    | 'damage_resolved'
     | 'effect_triggered'
     | 'effect_expired'
     | 'turn_started'

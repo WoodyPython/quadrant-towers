@@ -49,8 +49,8 @@ The MVP succeeds when four players can create or join a private room, complete a
 - The randomized turn order never changes. Eliminated players are skipped.
 - On a turn, the player must:
   1. choose exactly one of the three privately offered Ability Cards and resolve any required selection;
-  2. resolve exactly two actions, one at a time; and
-  3. end the turn after the second valid action resolves.
+  2. resolve two normal actions, one at a time, with up to four when a selected card grants extras; and
+  3. end the turn after all normal actions and pending free Attacks resolve. Card-granted free operations do not spend normal actions.
 - Action types may repeat. For example, Attack + Attack and Upgrade + Upgrade are legal.
 - There is no resource currency and no passing.
 - A player has 90 seconds for the whole turn. The timer continues through card selection and both actions.
@@ -119,13 +119,13 @@ The server produces a different view of the match for each player. A client is n
 
 ### 2.7 Ability Card system
 
-Ability Cards replace the fixed Tactic choices. The card framework is part of the MVP architecture, while the full card catalog and final balance values are a separate pre-release content task.
+Ability Cards replace the fixed Tactic choices. The finalized launch catalog contains 45 cards (10 Common, 10 Uncommon, 10 Rare, 10 Epic, 5 Legendary). New matches pin catalog and balance `launch-2`; existing `framework-1` matches retain their pinned content. See [Ability cards launch content](docs/ability-cards.md) for finalized progression, targeting, resolution and recovery behavior.
 
 #### Offer and selection rules
 
 - At the start of each player's turn, the server generates a private offer of exactly three distinct cards from the active, versioned card catalog.
 - Because every active player has one scheduled turn in each round, this produces one card choice per active player per round.
-- The player must choose exactly one offered card before taking either action. The other two are discarded.
+- The player must choose exactly one offered card before taking normal actions. The other two are discarded.
 - There are no rerolls in the MVP, and refreshing or reconnecting never changes an offer.
 - Offers are generated with the match's deterministic server seed, persisted before being sent, and visible only to the offered player until match end.
 - A player may receive the same card on later turns unless that card's definition has an explicit per-match limit.
@@ -141,7 +141,7 @@ The initial rarity order is **Common → Uncommon → Rare → Epic → Legendar
 - For each offer slot, the server first rolls an eligible rarity from that progress curve, then selects an eligible card within that rarity using the card's offer weight and excluding cards already in the offer. If a tier has no eligible card, selection falls back through configured lower tiers and finally the neutral fallback pool.
 - Early offers are weighted strongly toward lower ranks. Higher ranks unlock and gain weight as progress increases; Legendary cards appear only in the late game.
 - Rarity changes the expected strength or flexibility of a card, not whether its rules may bypass server validation.
-- Exact unlock thresholds and weights live in versioned balance configuration, not application code. They must be fixed before the balance-playtest milestone.
+- Finalized weights live in versioned balance configuration, not application code. Weights interpolate linearly between the launch anchors documented in [Ability cards launch content](docs/ability-cards.md); Legendary has zero weight through progress 0.40 and first becomes nonzero in the 0.40–0.60 segment.
 - Rarity is shown with a text label and icon as well as color.
 
 #### Card lifecycles
@@ -183,7 +183,7 @@ interface AbilityCardDefinition {
 - Match creation pins `cardCatalogVersion` and `balanceVersion`. Active matches therefore keep their original behavior across deployments.
 - Card descriptions are generated from or validated against effect parameters to reduce UI/rules drift.
 - Selected cards are public by default. A definition may mark a passive as hidden from opponents until it triggers; the server projection must omit the hidden effect entirely until then. All cards and effects are revealed when the match ends.
-- The initial catalog must include enough legal fallback and varied cards to prevent duplicate offers, but its names and balance are intentionally not finalized in this plan.
+- The launch catalog and first-pass balance are finalized. Three fallback-only neutral definitions guarantee distinct offers if normal weighted tiers cannot provide them; they are excluded from the 45-card launch counts and normal rolls.
 
 ### 2.8 Elimination
 
@@ -356,7 +356,8 @@ interface PlayerState {
 interface TurnState {
   round: number;
   activePlayerId: string;
-  actionsRemaining: 0 | 1 | 2;
+  actionsRemaining: number; // validated in [0, 4]
+  freeAttacksAvailable: number;
   offeredCardIds: [string, string, string];
   selectedCardId: string | null;
   deadlineAt: string;
@@ -465,7 +466,7 @@ Use table-driven tests for every rule boundary:
 
 - quadrant bounds and random assignment uniqueness;
 - turn order and eliminated-player skipping;
-- exactly two actions, including repeated types;
+- two normal actions (up to four with cards), free-operation accounting, pending free Attacks and repeated types;
 - build separation beside existing towers;
 - expand adjacency, connectivity, collision, and boundary checks;
 - upgrade health caps and card effects that modify health;
@@ -596,6 +597,7 @@ Do not collect raw rejoin tokens, hidden board snapshots, or unnecessary persona
 
 | Date | Decision |
 |---|---|
+| 2026-09-17 | Finalize 45 launch Ability Cards and interpolated per-slot rarity anchors as catalog/balance `launch-2`; preserve pinned `framework-1` recovery. Cards may grant up to four normal actions, free operations, shields, invulnerability, chained Attacks and Phoenix interception through the existing authoritative engine. Strategic Recon selects its quadrant, row and column via one crossing cell. |
 | 2026-09-15 | Milestone 2 resolves card choice and targets atomically, adds explicit turn-end/rejoin/seat-removal events, and persists start/rematch command receipts. |
 | 2026-09-15 | Lobby host ownership transfers to the earliest-joined connected player on explicit departure or after two disconnected minutes; if nobody is connected, transfer occurs on the next eligible reconnect. |
 | 2026-09-15 | All four original players must vote and be connected for a rematch; seats and preset persist while setup randomness is refreshed. |

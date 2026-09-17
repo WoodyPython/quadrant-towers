@@ -9,6 +9,12 @@ import {
   marks,
   secondsLeft,
   targetsFor,
+  cardTargetsFor,
+  cardPreview,
+  multiTarget,
+  targetComplete,
+  quadrant,
+  type CardTarget,
   type Action,
   type Point,
 } from './board-model';
@@ -48,7 +54,8 @@ type Selection = {
   towerId: string | null;
   cell: Point | null;
   cardId: string | null;
-  targets: Record<string, Point | string>;
+  targets: Record<string, CardTarget>;
+  completedTargets: string[];
 };
 export function Game() {
   const {
@@ -77,7 +84,13 @@ export function Game() {
     connection === 'online' && !pending && !!content && myTurn && !eliminated;
   const placing = view?.phase === 'placement';
   const card = content?.cards.find((c) => c.id === s?.cardId);
-  const target = card?.targets.find((t) => s?.targets[t.id] === undefined);
+  const target = card?.targets.find(
+    (t) =>
+      view &&
+      s &&
+      !s.completedTargets.includes(t.id) &&
+      !targetComplete(view, playerId, t, s.targets),
+  );
   const mode = placing
     ? 'place_town_hall'
     : (target?.kind ??
@@ -85,9 +98,11 @@ export function Game() {
   const legal = useMemo(
     () =>
       view && enabled
-        ? targetsFor(view, playerId, mode, s?.towerId ?? undefined)
+        ? target && s
+          ? cardTargetsFor(view, playerId, target, s.targets)
+          : targetsFor(view, playerId, mode, s?.towerId ?? undefined)
         : new Set<string>(),
-    [view, enabled, playerId, mode, s?.towerId],
+    [view, enabled, playerId, mode, s?.towerId, target, s],
   );
   useEffect(() => {
     if (
@@ -95,7 +110,8 @@ export function Game() {
       enabled &&
       !placing &&
       view.turn.selectedCardId !== null &&
-      view.turn.actionsRemaining === 0
+      view.turn.actionsRemaining === 0 &&
+      (view.turn.freeAttacksAvailable ?? 0) === 0
     )
       void send('turn:end', mutation());
   }, [view, enabled, placing]);
@@ -107,6 +123,7 @@ export function Game() {
       cell: null,
       cardId: null,
       targets: {},
+      completedTargets: [],
     }),
     [view],
   );
@@ -126,13 +143,24 @@ export function Game() {
       }
       if (!legal.has(key(p))) return;
       if (target) {
+        const value = target.kind.includes('tower')
+          ? tower!.id
+          : target.kind === 'enemy_quadrant'
+            ? view.players.find(
+                (x) => x.quadrant === quadrant(p, view.dimensions.quadrantSize),
+              )!.id
+            : p;
+        const existing = s!.targets[target.id];
+        const chosen = multiTarget(target)
+          ? ([
+              ...(Array.isArray(existing) ? existing : []),
+              value,
+            ] as CardTarget)
+          : value;
         setSelection({
           ...s!,
           cell: p,
-          targets: {
-            ...s!.targets,
-            [target.id]: target.kind.includes('tower') ? tower!.id : p,
-          },
+          targets: { ...s!.targets, [target.id]: chosen },
         });
         return;
       }
@@ -172,7 +200,10 @@ export function Game() {
   const winner = room.players.find((p) => p.id === view.result?.winnerId);
   const chooseCard = !placing && myTurn && view.turn.selectedCardId === null;
   const actionsAvailable =
-    enabled && !chooseCard && view.turn.actionsRemaining > 0;
+    enabled &&
+    !chooseCard &&
+    (view.turn.actionsRemaining > 0 ||
+      (view.turn.freeAttacksAvailable ?? 0) > 0);
   const history = view.result
     ? view.history
     : view.history.filter(
@@ -187,6 +218,17 @@ export function Game() {
         damaged_own_tower: 'Choose a tower below 10 health',
         enemy_cell: 'Choose an enemy cell',
         hidden_enemy_cell: 'Choose a hidden enemy cell',
+        one_health_tower: 'Choose one of your 1-health towers',
+        expandable_tower: 'Choose a tower with room to expand',
+        revealed_enemy_tower: 'Choose a visible enemy tower',
+        own_towers: `Choose up to ${target.count} damaged towers`,
+        enemy_rectangle: `Choose the top-left cell of a ${target.size}×${target.size} area`,
+        connected_enemy_cells: `Choose ${target.count} connected enemy cells`,
+        empty_own_cells: `Choose ${target.count} empty cells in your quadrant`,
+        expansion_cells: `Choose up to ${target.count} adjacent expansion cells in order`,
+        enemy_quadrant: 'Choose an active enemy quadrant',
+        enemy_row_column:
+          'Choose a cell where the desired row and column cross',
       }[target.kind]
     : s?.action === 'expand'
       ? s.towerId
@@ -339,6 +381,11 @@ export function Game() {
               playerId={playerId}
               legal={legal}
               selected={s?.cell ?? null}
+              preview={
+                card && s
+                  ? cardPreview(view, card.targets, s.targets)
+                  : new Set<string>()
+              }
               onSelect={select}
             />
             {cardPicker}
@@ -505,7 +552,10 @@ export function Game() {
                       role="img"
                       aria-label={`${view.turn.actionsRemaining} actions remaining`}
                     >
-                      {[0, 1].map((i) => (
+                      {Array.from(
+                        { length: Math.max(2, view.turn.actionsRemaining) },
+                        (_, i) => i,
+                      ).map((i) => (
                         <i
                           key={i}
                           data-filled={i < view.turn.actionsRemaining}
@@ -522,7 +572,11 @@ export function Game() {
                       <button
                         key={action}
                         aria-pressed={s?.action === action}
-                        disabled={!actionsAvailable}
+                        disabled={
+                          !actionsAvailable ||
+                          (view.turn.actionsRemaining === 0 &&
+                            action !== 'attack')
+                        }
                         onClick={() => setSelection({ ...base(), action })}
                       >
                         <Icon name={action} size={30} />
@@ -536,12 +590,38 @@ export function Game() {
               )}
               {instruction && (
                 <div className={styles.targeting}>
-                  <span>{instruction}</span>
+                  <span>
+                    {instruction}
+                    {target && multiTarget(target)
+                      ? ` · ${Array.isArray(s?.targets[target.id]) ? (s!.targets[target.id] as unknown[]).length : 0}/${target.count} selected`
+                      : ''}
+                  </span>
                   <button aria-label="Cancel selection" onClick={clear}>
                     <Icon name="close" size={18} />
                   </button>
                 </div>
               )}
+              {(view.turn.freeAttacksAvailable ?? 0) > 0 && myTurn && (
+                <p role="status">
+                  {view.turn.freeAttacksAvailable} free Attack
+                  {view.turn.freeAttacksAvailable === 1 ? '' : 's'} available.
+                  Attacks use these first.
+                </p>
+              )}
+              {target?.kind === 'expansion_cells' &&
+                Array.isArray(s?.targets[target.id]) &&
+                (s!.targets[target.id] as unknown[]).length > 0 && (
+                  <button
+                    onClick={() =>
+                      setSelection({
+                        ...s!,
+                        completedTargets: [...s!.completedTargets, target.id],
+                      })
+                    }
+                  >
+                    Finish selecting cells
+                  </button>
+                )}
               {card && (
                 <div className={styles.confirm}>
                   <button
@@ -563,7 +643,12 @@ export function Game() {
                   {Object.keys(s!.targets).length > 0 && (
                     <button
                       onClick={() =>
-                        setSelection({ ...s!, targets: {}, cell: null })
+                        setSelection({
+                          ...s!,
+                          targets: {},
+                          completedTargets: [],
+                          cell: null,
+                        })
                       }
                     >
                       Reselect target
@@ -608,6 +693,9 @@ export function Game() {
                             room.players.find((p) => p.id === effect.ownerId)
                               ?.displayName
                           }
+                          {effect.shieldRemaining != null
+                            ? ` · ${effect.shieldRemaining} shield point${effect.shieldRemaining === 1 ? '' : 's'}`
+                            : ''}
                           {effect.remainingCharges != null
                             ? ` · ${effect.remainingCharges} charge${effect.remainingCharges === 1 ? '' : 's'}`
                             : ''}

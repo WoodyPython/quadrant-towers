@@ -4,11 +4,13 @@ import { io, type Socket } from 'socket.io-client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
   defaultRegistry,
+  launchCards,
+  cellKey,
   applyCommand,
   createMatch,
   projectMatch,
   PRESETS,
-  legalTargets,
+  fallbackTargets,
   quadrantCells,
   towerAt,
   type MatchState,
@@ -222,12 +224,7 @@ async function choose(
   return request(clients[actor(current)]!, 'card:choose', {
     ...envelope(current),
     cardId,
-    targets: Object.fromEntries(
-      definition.targets.map((t) => [
-        t.id,
-        legalTargets(current, current.turn.playerId, t)[0]!,
-      ]),
-    ),
+    targets: fallbackTargets(current, current.turn.playerId, definition),
   });
 }
 
@@ -424,12 +421,7 @@ it('enforces turns and versions, retries durably, and never exposes opponent pri
   const data = {
     ...envelope(current),
     cardId: offer,
-    targets: Object.fromEntries(
-      definition.targets.map((t) => [
-        t.id,
-        legalTargets(current, current.turn.playerId, t)[0]!,
-      ]),
-    ),
+    targets: fallbackTargets(current, current.turn.playerId, definition),
   };
   const accepted = success(
     await request(clients[currentActor]!, 'card:choose', data),
@@ -704,12 +696,7 @@ it('recovers an uncertain commit and returns the original receipt after a lost a
   const data = {
     ...envelope(current),
     cardId: definition.id,
-    targets: Object.fromEntries(
-      definition.targets.map((t) => [
-        t.id,
-        legalTargets(current, current.turn.playerId, t)[0]!,
-      ]),
-    ),
+    targets: fallbackTargets(current, current.turn.playerId, definition),
   };
   const original = store.transaction.bind(store);
   let failCommitResponse = true;
@@ -917,13 +904,18 @@ it('preserves a hidden passive through restart and reveals it only when triggere
 it('finishes by last survivor through legal network actions and lets eliminated players reconnect', async () => {
   const roomId = await setup();
   await start();
-  // Each player attacks the next surviving opponent. No new towers or healing cards.
+  // Each player resolves their card and all granted actions against surviving opponents.
   let now = await state(roomId);
   for (let turns = 0; turns < 30 && !now.result; turns++) {
     const neutral = now.turn.cardOffer.find((id) => id.startsWith('neutral-'));
     if (neutral) success(await choose(now, neutral));
     else success(await choose(now));
-    for (let action = 0; action < 2; action++) {
+    now = await state(roomId);
+    while (
+      !now.result &&
+      (now.turn.actionsRemaining > 0 ||
+        (now.turn.freeAttacksAvailable ?? 0) > 0)
+    ) {
       now = await state(roomId);
       if (now.result) break;
       const target = now.towers.find((t) => t.ownerId !== now.turn.playerId)!;
@@ -933,6 +925,7 @@ it('finishes by last survivor through legal network actions and lets eliminated 
           action: { type: 'attack', cell: target.cells[0]! },
         }),
       );
+      now = await state(roomId);
     }
     now = await state(roomId);
     if (!now.result)
@@ -1134,3 +1127,96 @@ it('bounds pending socket work and logs safe identifiers without private state',
     expect(fields).not.toContain(secret);
   expect(fields).toContain('Command completed');
 });
+
+it.each([
+  'barricade',
+  'impenetrable',
+  'phoenix_protocol',
+  'focused_fire',
+  'kill_chain',
+  'overclock',
+  'time_warp',
+  'mobilization',
+  'expansion_plans',
+  'counterintelligence',
+])(
+  'persists launch %s through database recovery, private sync and idempotent replay',
+  async (cardId) => {
+    const roomId = await setup();
+    await start();
+    let current = await state(roomId);
+    expect(current.cardCatalogVersion).toBe('launch-2');
+    expect(current.balanceVersion).toBe('launch-2');
+    const definition = launchCards.find((c) => c.id === cardId)!;
+    const victim = current.towers.find(
+      (t) => t.ownerId !== current.turn.playerId,
+    )!;
+    await store.transaction(roomId, async (aggregate) => {
+      const fixture = aggregate.state!;
+      fixture.turn.cardOffer = [cardId, 'neutral_reserve', 'neutral_patience'];
+      fixture.turn.round = 10;
+      fixture.players.find((p) => p.id === fixture.turn.playerId)!.revealed =
+        fixture.towers
+          .filter((t) => t.ownerId !== fixture.turn.playerId)
+          .map((t) => cellKey(t.cells[0]!));
+      if (cardId === 'kill_chain')
+        fixture.towers.find((t) => t.id === victim.id)!.health = 1;
+      fixture.version++;
+      return { value: null, write: {} };
+    });
+    current = await state(roomId);
+    const data = {
+      ...envelope(current),
+      cardId,
+      targets: fallbackTargets(current, current.turn.playerId, definition),
+    };
+    const selected = success(
+      await request(clients[actor(current)]!, 'card:choose', data),
+    );
+    if (cardId === 'focused_fire' || cardId === 'kill_chain') {
+      current = await state(roomId);
+      success(
+        await request(clients[actor(current)]!, 'action:submit', {
+          ...envelope(current),
+          action: { type: 'attack', cell: victim.cells[0]! },
+        }),
+      );
+    }
+    const persisted = await state(roomId);
+    if (cardId === 'kill_chain')
+      expect(persisted.turn.freeAttacksAvailable).toBe(1);
+    if (cardId === 'focused_fire')
+      expect(
+        persisted.effects.find((e) => e.cardId === cardId)!.hitTowerIds,
+      ).toEqual([victim.id]);
+    if (cardId === 'time_warp') expect(persisted.turn.actionsRemaining).toBe(4);
+    await app.close();
+    await boot();
+    await reconnect();
+    expect(await state(roomId)).toEqual(persisted);
+    for (let i = 0; i < identities.length; i++) {
+      const view = (await sync(i)).match!;
+      if (identities[i]!.playerId === persisted.turn.playerId)
+        expect(view.turn.cardOffer).toEqual(persisted.turn.cardOffer);
+      else {
+        expect(view.turn.cardOffer).toBeUndefined();
+        expect(
+          view.effects.every(
+            (e) =>
+              e.targets === undefined &&
+              e.shieldRemaining === undefined &&
+              e.hitTowerIds === undefined,
+          ),
+        ).toBe(true);
+      }
+    }
+    expect(
+      await request(clients[actor(persisted)]!, 'card:choose', data),
+    ).toEqual(selected);
+    expect(await state(roomId)).toEqual(persisted);
+    clock.advance(90001);
+    await vi.waitFor(async () =>
+      expect((await state(roomId)).turn.number).toBe(persisted.turn.number + 1),
+    );
+  },
+);
