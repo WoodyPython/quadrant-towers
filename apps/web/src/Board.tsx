@@ -141,9 +141,40 @@ export const Board = memo(function Board({
   const minimum = coarse ? 44 : 28;
   const cellSize = overview ? fitted : Math.max(minimum, fitted) * zoom;
   const live = useRef({ zoom, overview, minimum, fitted });
-  useEffect(() => {
+  const zoomScroll = useRef<{ left: number; top: number } | null>(null);
+  useLayoutEffect(() => {
     live.current = { zoom, overview, minimum, fitted };
+    const el = viewport.current;
+    if (el && zoomScroll.current) {
+      // Apply after the grid resizes, so the old scroll bounds cannot clamp it.
+      el.scrollLeft = zoomScroll.current.left;
+      el.scrollTop = zoomScroll.current.top;
+      zoomScroll.current = null;
+    }
   });
+  const zoomAt = useCallback(
+    (
+      next: number,
+      oldCellSize: number,
+      anchorX: number,
+      anchorY: number,
+      offsetX: number,
+      offsetY: number,
+    ) => {
+      const current = live.current;
+      if (!current.overview && next === current.zoom) return;
+      const ratio =
+        (Math.max(current.minimum, current.fitted) * next) / oldCellSize;
+      // The coordinate axis stays 24px wide at every zoom level.
+      zoomScroll.current = {
+        left: 24 + (anchorX - 24) * ratio - offsetX,
+        top: 24 + (anchorY - 24) * ratio - offsetY,
+      };
+      setOverview(false);
+      setZoom(next);
+    },
+    [],
+  );
   useEffect(() => {
     const el = viewport.current;
     if (!el) return;
@@ -158,19 +189,21 @@ export const Board = memo(function Board({
         3,
         Math.max(1, base * Math.exp(-e.deltaY * 0.0018)),
       );
-      const newCellSize = Math.max(current.minimum, current.fitted) * next;
       const rect = el.getBoundingClientRect();
-      const ratio = newCellSize / oldCellSize;
-      const anchorX = e.clientX - rect.left + el.scrollLeft;
-      const anchorY = e.clientY - rect.top + el.scrollTop;
-      setOverview(false);
-      setZoom(next);
-      el.scrollLeft = anchorX * ratio - (e.clientX - rect.left);
-      el.scrollTop = anchorY * ratio - (e.clientY - rect.top);
+      const offsetX = e.clientX - rect.left;
+      const offsetY = e.clientY - rect.top;
+      zoomAt(
+        next,
+        oldCellSize,
+        offsetX + el.scrollLeft,
+        offsetY + el.scrollTop,
+        offsetX,
+        offsetY,
+      );
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, []);
+  }, [zoomAt]);
   useLayoutEffect(() => {
     const el = viewport.current;
     if (positioned.current || !el || available !== el.clientWidth) return;
@@ -339,16 +372,17 @@ export const Board = memo(function Board({
               const oldCellSize = p.overview
                 ? fitted
                 : Math.max(minimum, fitted) * p.zoom;
-              const newCellSize = Math.max(minimum, fitted) * next;
-              const ratio = newCellSize / oldCellSize;
               const rect = e.currentTarget.getBoundingClientRect();
-              const anchorX = p.midX - rect.left + p.scrollLeft;
-              const anchorY = p.midY - rect.top + p.scrollTop;
-              setOverview(false);
-              setZoom(next);
-              e.currentTarget.scrollLeft =
-                anchorX * ratio - (p.midX - rect.left);
-              e.currentTarget.scrollTop = anchorY * ratio - (p.midY - rect.top);
+              const offsetX = p.midX - rect.left;
+              const offsetY = p.midY - rect.top;
+              zoomAt(
+                next,
+                oldCellSize,
+                offsetX + p.scrollLeft,
+                offsetY + p.scrollTop,
+                offsetX,
+                offsetY,
+              );
             }
             return;
           }

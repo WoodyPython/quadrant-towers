@@ -18,7 +18,8 @@ import {
 const n = z.number().int().nonnegative();
 const snapshotSchema = z.strictObject({
   id: z.uuid(),
-  phase: z.enum(['placement', 'battle']),
+  // Version 1 snapshots saved before manual placement were always in battle.
+  phase: z.enum(['placement', 'battle']).default('battle'),
   preset: presetSchema,
   cardCatalogVersion: idSchema,
   balanceVersion: idSchema,
