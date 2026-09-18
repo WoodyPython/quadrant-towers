@@ -169,15 +169,37 @@ test('touch pinch preserves the cell beneath the gesture midpoint', async ({
       type: 'touchStart',
       touchPoints: points(90),
     });
-    for (let distance = 80; distance >= 10; distance -= 5)
+    for (let distance = 80; distance >= 10; distance -= 5) {
       await session.send('Input.dispatchTouchEvent', {
         type: 'touchMove',
         touchPoints: points(distance),
       });
+      await page.waitForTimeout(20);
+    }
+    await expect
+      .poll(async () => (await anchor(viewport, offset)).size)
+      .toBeCloseTo(before.size, 1);
+    const reverseSizes: number[] = [];
+    for (let distance = 12; distance <= 30; distance += 2) {
+      await session.send('Input.dispatchTouchEvent', {
+        type: 'touchMove',
+        touchPoints: points(distance),
+      });
+      await page.waitForTimeout(20);
+      reverseSizes.push((await anchor(viewport, offset)).size);
+    }
     await session.send('Input.dispatchTouchEvent', {
       type: 'touchEnd',
       touchPoints: [],
     });
+    expect(reverseSizes[0]).toBeGreaterThan(before.size);
+    expect(reverseSizes[0]).toBeLessThan(before.size * 1.3);
+    for (let index = 1; index < reverseSizes.length; index++)
+      expect(reverseSizes[index]).toBeGreaterThanOrEqual(
+        reverseSizes[index - 1]!,
+      );
+
+    await page.getByRole('button', { name: 'Fit board' }).click();
     await expect
       .poll(async () => (await anchor(viewport, offset)).size)
       .toBeCloseTo(before.size, 1);

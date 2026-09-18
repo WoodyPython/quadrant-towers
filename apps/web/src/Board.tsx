@@ -186,12 +186,18 @@ export const Board = memo(function Board({
       offsetY: number,
     ) => {
       const el = viewport.current;
-      if (!el) return;
+      if (!el) return undefined;
       const next = clampZoom(nextValue);
       updateSurface(next);
+      if (next <= fitCell.current + 0.01) {
+        el.scrollLeft = 0;
+        el.scrollTop = 0;
+        return next;
+      }
       const scale = next / fitCell.current;
       el.scrollLeft = contentX * scale - offsetX;
       el.scrollTop = contentY * scale - offsetY;
+      return next;
     },
     [clampZoom, updateSurface],
   );
@@ -511,14 +517,42 @@ export const Board = memo(function Board({
                 gestureFrame.current = requestAnimationFrame(() => {
                   gestureFrame.current = null;
                   const pending = pendingGesture.current;
-                  if (pending)
-                    zoomToContent(
-                      pending.cell,
-                      pending.contentX,
-                      pending.contentY,
-                      pending.offsetX,
-                      pending.offsetY,
-                    );
+                  pendingGesture.current = null;
+                  if (!pending) return;
+                  const applied = zoomToContent(
+                    pending.cell,
+                    pending.contentX,
+                    pending.contentY,
+                    pending.offsetX,
+                    pending.offsetY,
+                  );
+                  if (
+                    applied === undefined ||
+                    applied > fitCell.current + 0.01 ||
+                    touches.current.size !== 2
+                  )
+                    return;
+                  const [first, second] = [...touches.current.values()] as [
+                    { x: number; y: number },
+                    { x: number; y: number },
+                  ];
+                  const viewportElement = viewport.current;
+                  if (!viewportElement) return;
+                  const viewportBounds =
+                    viewportElement.getBoundingClientRect();
+                  const midpointX = (first.x + second.x) / 2;
+                  const midpointY = (first.y + second.y) / 2;
+                  const offsetX = midpointX - viewportBounds.left;
+                  const offsetY = midpointY - viewportBounds.top;
+                  pinch.current = {
+                    distance: Math.hypot(
+                      first.x - second.x,
+                      first.y - second.y,
+                    ),
+                    cell: fitCell.current,
+                    contentX: viewportElement.scrollLeft + offsetX,
+                    contentY: viewportElement.scrollTop + offsetY,
+                  };
                 });
             } else if (touches.current.size === 1) {
               const d = dragging.current;
