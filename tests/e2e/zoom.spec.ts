@@ -184,6 +184,38 @@ test('touch pinch preserves the cell beneath the gesture midpoint', async ({
     const fitted = await boardGeometry(viewport);
     expect(fitted.scrollWidth).toBeLessThanOrEqual(fitted.width + 1);
     expect(fitted.scrollHeight).toBeLessThanOrEqual(fitted.height + 1);
+    const settled = await viewport.evaluate(async (el) => {
+      const samples: Array<{
+        size: number;
+        left: number;
+        top: number;
+        width: number;
+        height: number;
+      }> = [];
+      for (let frame = 0; frame < 12; frame++) {
+        await new Promise(requestAnimationFrame);
+        samples.push({
+          size: el
+            .querySelector<HTMLElement>('[data-cell]')!
+            .getBoundingClientRect().width,
+          left: el.scrollLeft,
+          top: el.scrollTop,
+          width: el.scrollWidth,
+          height: el.scrollHeight,
+        });
+      }
+      return samples;
+    });
+    expect(
+      Math.max(...settled.map((sample) => sample.size)) -
+        Math.min(...settled.map((sample) => sample.size)),
+    ).toBeLessThan(0.05);
+    expect(
+      new Set(settled.map((sample) => `${sample.left},${sample.top}`)).size,
+    ).toBe(1);
+    expect(
+      new Set(settled.map((sample) => `${sample.width},${sample.height}`)).size,
+    ).toBe(1);
 
     await page.locator('[data-cell]').first().tap();
     expect(

@@ -314,9 +314,12 @@ export const Board = memo(function Board({
     const el = viewport.current;
     const boardGrid = grid.current;
     if (!el || !boardGrid) return;
+    let measuredSide = 0;
     const measure = () => {
-      const side = Math.min(el.clientWidth, el.clientHeight);
-      if (!side) return;
+      const bounds = el.getBoundingClientRect();
+      const side = Math.min(bounds.width, bounds.height);
+      if (!side || Math.abs(side - measuredSide) < 0.1) return;
+      measuredSide = side;
       const oldFit = fitCell.current;
       const oldSide = baseSide.current * (cellSize.current / oldFit);
       const centerX = oldSide
@@ -343,7 +346,7 @@ export const Board = memo(function Board({
     };
     measure();
     const observer = new ResizeObserver(measure);
-    observer.observe(el);
+    observer.observe(el, { box: 'border-box' });
     return () => observer.disconnect();
   }, [clampZoom, limits, size, updateSurface]);
   useEffect(() => {

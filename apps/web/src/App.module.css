@@ -482,9 +482,12 @@
   overflow: auto;
   overscroll-behavior: contain;
   touch-action: none;
-  scrollbar-width: thin;
-  scrollbar-color: #9ca591 transparent;
+  scrollbar-width: none;
   user-select: none;
+}
+.boardViewport::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 .boardSurface {
   position: relative;
