@@ -489,6 +489,9 @@
   width: 0;
   height: 0;
 }
+.boardViewport[data-at-fit='true'] {
+  overflow: hidden;
+}
 .boardSurface {
   position: relative;
   min-width: 100%;

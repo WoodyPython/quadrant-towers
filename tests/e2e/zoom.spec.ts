@@ -179,6 +179,20 @@ test('touch pinch preserves the cell beneath the gesture midpoint', async ({
     await expect
       .poll(async () => (await anchor(viewport, offset)).size)
       .toBeCloseTo(before.size, 1);
+    await expect(viewport).toHaveAttribute('data-at-fit', 'true');
+    const jitterSizes: number[] = [];
+    for (const distance of [10.2, 9.9, 10.3, 10.1]) {
+      await session.send('Input.dispatchTouchEvent', {
+        type: 'touchMove',
+        touchPoints: points(distance),
+      });
+      await page.waitForTimeout(20);
+      jitterSizes.push((await anchor(viewport, offset)).size);
+    }
+    expect(Math.max(...jitterSizes) - Math.min(...jitterSizes)).toBeLessThan(
+      0.05,
+    );
+    await expect(viewport).toHaveAttribute('data-at-fit', 'true');
     const reverseSizes: number[] = [];
     for (let distance = 12; distance <= 30; distance += 2) {
       await session.send('Input.dispatchTouchEvent', {
@@ -194,6 +208,7 @@ test('touch pinch preserves the cell beneath the gesture midpoint', async ({
     });
     expect(reverseSizes[0]).toBeGreaterThan(before.size);
     expect(reverseSizes[0]).toBeLessThan(before.size * 1.3);
+    await expect(viewport).not.toHaveAttribute('data-at-fit', 'true');
     for (let index = 1; index < reverseSizes.length; index++)
       expect(reverseSizes[index]).toBeGreaterThanOrEqual(
         reverseSizes[index - 1]!,
@@ -203,6 +218,7 @@ test('touch pinch preserves the cell beneath the gesture midpoint', async ({
     await expect
       .poll(async () => (await anchor(viewport, offset)).size)
       .toBeCloseTo(before.size, 1);
+    await expect(viewport).toHaveAttribute('data-at-fit', 'true');
     const fitted = await boardGeometry(viewport);
     expect(fitted.scrollWidth).toBeLessThanOrEqual(fitted.width + 1);
     expect(fitted.scrollHeight).toBeLessThanOrEqual(fitted.height + 1);

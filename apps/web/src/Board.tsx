@@ -131,6 +131,7 @@ export const Board = memo(function Board({
     cell: number;
     contentX: number;
     contentY: number;
+    fitDistance?: number;
   } | null>(null);
   const suppressClick = useRef(false);
   const fitCell = useRef(1);
@@ -172,6 +173,8 @@ export const Board = memo(function Board({
     if (!el || !boardSurface || !boardGrid) return;
     const scale = next / fitCell.current;
     const side = baseSide.current * scale;
+    if (next <= fitCell.current + 0.01) el.dataset.atFit = 'true';
+    else delete el.dataset.atFit;
     boardSurface.style.width = `${side}px`;
     boardSurface.style.height = `${side}px`;
     boardGrid.style.transform = `scale(${scale})`;
@@ -506,8 +509,14 @@ export const Board = memo(function Board({
               ];
               const distance = Math.hypot(a.x - b.x, a.y - b.y);
               const rect = e.currentTarget.getBoundingClientRect();
+              const fitRatio = p.fitDistance ? distance / p.fitDistance : null;
               pendingGesture.current = {
-                cell: p.cell * (distance / p.distance),
+                cell:
+                  fitRatio === null
+                    ? p.cell * (distance / p.distance)
+                    : fitRatio < 1.06
+                      ? fitCell.current
+                      : fitCell.current * fitRatio,
                 contentX: p.contentX,
                 contentY: p.contentY,
                 offsetX: (a.x + b.x) / 2 - rect.left,
@@ -526,11 +535,7 @@ export const Board = memo(function Board({
                     pending.offsetX,
                     pending.offsetY,
                   );
-                  if (
-                    applied === undefined ||
-                    applied > fitCell.current + 0.01 ||
-                    touches.current.size !== 2
-                  )
+                  if (applied === undefined || touches.current.size !== 2)
                     return;
                   const [first, second] = [...touches.current.values()] as [
                     { x: number; y: number },
@@ -544,14 +549,31 @@ export const Board = memo(function Board({
                   const midpointY = (first.y + second.y) / 2;
                   const offsetX = midpointX - viewportBounds.left;
                   const offsetY = midpointY - viewportBounds.top;
+                  const liveDistance = Math.hypot(
+                    first.x - second.x,
+                    first.y - second.y,
+                  );
+                  const existingFitDistance = pinch.current?.fitDistance;
+                  if (applied > fitCell.current + 0.01) {
+                    if (existingFitDistance === undefined) return;
+                    const scale = applied / fitCell.current;
+                    pinch.current = {
+                      distance: liveDistance,
+                      cell: applied,
+                      contentX: (viewportElement.scrollLeft + offsetX) / scale,
+                      contentY: (viewportElement.scrollTop + offsetY) / scale,
+                    };
+                    return;
+                  }
                   pinch.current = {
-                    distance: Math.hypot(
-                      first.x - second.x,
-                      first.y - second.y,
-                    ),
+                    distance: liveDistance,
                     cell: fitCell.current,
                     contentX: viewportElement.scrollLeft + offsetX,
                     contentY: viewportElement.scrollTop + offsetY,
+                    fitDistance: Math.min(
+                      existingFitDistance ?? liveDistance,
+                      liveDistance,
+                    ),
                   };
                 });
             } else if (touches.current.size === 1) {
