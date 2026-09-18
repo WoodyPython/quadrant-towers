@@ -4,13 +4,24 @@ import { startMatch, activePage, chooseCard } from './helpers.js';
 async function anchor(viewport: Locator, offset: { x: number; y: number }) {
   return viewport.evaluate((el, offset) => {
     const cell = el.querySelector<HTMLElement>('[data-cell]')!;
-    const size = cell.getBoundingClientRect().width;
+    const viewportRect = el.getBoundingClientRect();
+    const cellRect = cell.getBoundingClientRect();
+    const size = cellRect.width;
     return {
       size,
-      x: (el.scrollLeft + offset.x - 24) / size,
-      y: (el.scrollTop + offset.y - 24) / size,
+      x: (offset.x - (cellRect.left - viewportRect.left)) / size,
+      y: (offset.y - (cellRect.top - viewportRect.top)) / size,
     };
   }, offset);
+}
+
+async function boardGeometry(viewport: Locator) {
+  return viewport.evaluate((el) => ({
+    width: el.clientWidth,
+    height: el.clientHeight,
+    scrollWidth: el.scrollWidth,
+    scrollHeight: el.scrollHeight,
+  }));
 }
 
 test('wheel zoom preserves the cell under the cursor from a fitted board', async ({
@@ -24,14 +35,36 @@ test('wheel zoom preserves the cell under the cursor from a fitted board', async
       active.getByRole('button', { name: 'Build', exact: true }),
     ).toBeEnabled();
     const page = pages[0]!;
-    await expect(page.getByRole('button', { name: 'Zoom in' })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Zoom out' })).toHaveCount(0);
+    const zoomIn = page.getByRole('button', { name: 'Zoom in' });
+    const zoomOut = page.getByRole('button', { name: 'Zoom out' });
+    await expect(zoomIn).toBeVisible();
+    await expect(zoomOut).toBeVisible();
+    await expect(zoomOut).toBeDisabled();
     await expect(page.getByRole('button', { name: 'End turn' })).toHaveCount(0);
-    await page.getByRole('button', { name: 'Fit board' }).click();
     const viewport = page.locator('[class*="boardViewport"]');
+    const fitted = await boardGeometry(viewport);
+    expect(Math.abs(fitted.width - fitted.height)).toBeLessThanOrEqual(1);
+    expect(fitted.scrollWidth).toBeLessThanOrEqual(fitted.width + 1);
+    expect(fitted.scrollHeight).toBeLessThanOrEqual(fitted.height + 1);
     const bounds = (await viewport.boundingBox())!;
     const offset = { x: bounds.width / 2, y: bounds.height / 2 };
     const before = await anchor(viewport, offset);
+
+    await zoomIn.click();
+    await expect
+      .poll(async () => (await anchor(viewport, offset)).size)
+      .toBeGreaterThan(before.size);
+    const buttonZoom = await anchor(viewport, offset);
+    expect(buttonZoom.x).toBeCloseTo(before.x, 1);
+    expect(buttonZoom.y).toBeCloseTo(before.y, 1);
+    await expect(zoomOut).toBeEnabled();
+
+    await zoomOut.click();
+    await expect
+      .poll(async () => (await anchor(viewport, offset)).size)
+      .toBeCloseTo(before.size, 1);
+    await expect(zoomOut).toBeDisabled();
+
     await page.mouse.move(bounds.x + offset.x, bounds.y + offset.y);
     await page.mouse.wheel(0, -300);
     await expect
@@ -47,6 +80,14 @@ test('wheel zoom preserves the cell under the cursor from a fitted board', async
     const smaller = await anchor(viewport, offset);
     expect(smaller.x).toBeCloseTo(before.x, 1);
     expect(smaller.y).toBeCloseTo(before.y, 1);
+
+    await page.getByRole('button', { name: 'Fit board' }).click();
+    await expect
+      .poll(async () => (await anchor(viewport, offset)).size)
+      .toBeCloseTo(before.size, 1);
+    const reset = await boardGeometry(viewport);
+    expect(reset.scrollWidth).toBeLessThanOrEqual(reset.width + 1);
+    expect(reset.scrollHeight).toBeLessThanOrEqual(reset.height + 1);
   } finally {
     await Promise.all(contexts.map((context) => context.close()));
   }
@@ -68,6 +109,14 @@ test('touch pinch preserves the cell beneath the gesture midpoint', async ({
     const offset = { x: bounds.width / 2, y: bounds.height / 2 };
     const before = await anchor(viewport, offset);
     const session = await page.context().newCDPSession(page);
+    await page.evaluate(() => {
+      (window as typeof window & { __boardClicks: number }).__boardClicks = 0;
+      document.addEventListener('click', (event) => {
+        if ((event.target as Element).closest('[data-cell]'))
+          (window as typeof window & { __boardClicks: number }).__boardClicks +=
+            1;
+      });
+    });
     const x = bounds.x + offset.x;
     const y = bounds.y + offset.y;
     const points = (distance: number) => [
@@ -78,11 +127,15 @@ test('touch pinch preserves the cell beneath the gesture midpoint', async ({
       type: 'touchStart',
       touchPoints: points(30),
     });
-    for (let distance = 35; distance <= 90; distance += 5)
+    const intermediateSizes: number[] = [];
+    for (let distance = 35; distance <= 90; distance += 5) {
       await session.send('Input.dispatchTouchEvent', {
         type: 'touchMove',
         touchPoints: points(distance),
       });
+      await page.waitForTimeout(20);
+      intermediateSizes.push((await anchor(viewport, offset)).size);
+    }
     await session.send('Input.dispatchTouchEvent', {
       type: 'touchEnd',
       touchPoints: [],
@@ -93,6 +146,65 @@ test('touch pinch preserves the cell beneath the gesture midpoint', async ({
     const after = await anchor(viewport, offset);
     expect(after.x).toBeCloseTo(before.x, 1);
     expect(after.y).toBeCloseTo(before.y, 1);
+    expect(
+      await page.evaluate(
+        () =>
+          (window as typeof window & { __boardClicks: number }).__boardClicks,
+      ),
+    ).toBe(0);
+    expect(
+      new Set(intermediateSizes.map((value) => Math.round(value))).size,
+    ).toBeGreaterThan(3);
+
+    await session.send('Input.dispatchTouchEvent', {
+      type: 'touchStart',
+      touchPoints: points(90),
+    });
+    for (let distance = 80; distance >= 10; distance -= 5)
+      await session.send('Input.dispatchTouchEvent', {
+        type: 'touchMove',
+        touchPoints: points(distance),
+      });
+    await session.send('Input.dispatchTouchEvent', {
+      type: 'touchEnd',
+      touchPoints: [],
+    });
+    await expect
+      .poll(async () => (await anchor(viewport, offset)).size)
+      .toBeCloseTo(before.size, 1);
+    const fitted = await boardGeometry(viewport);
+    expect(fitted.scrollWidth).toBeLessThanOrEqual(fitted.width + 1);
+    expect(fitted.scrollHeight).toBeLessThanOrEqual(fitted.height + 1);
+
+    await page.locator('[data-cell]').first().tap();
+    expect(
+      await page.evaluate(
+        () =>
+          (window as typeof window & { __boardClicks: number }).__boardClicks,
+      ),
+    ).toBe(1);
+
+    await page.evaluate(() => {
+      (window as typeof window & { __boardClicks: number }).__boardClicks = 0;
+    });
+    await session.send('Input.dispatchTouchEvent', {
+      type: 'touchStart',
+      touchPoints: [{ x, y, id: 3 }],
+    });
+    await session.send('Input.dispatchTouchEvent', {
+      type: 'touchMove',
+      touchPoints: [{ x: x + 35, y, id: 3 }],
+    });
+    await session.send('Input.dispatchTouchEvent', {
+      type: 'touchEnd',
+      touchPoints: [],
+    });
+    expect(
+      await page.evaluate(
+        () =>
+          (window as typeof window & { __boardClicks: number }).__boardClicks,
+      ),
+    ).toBe(0);
   } finally {
     await Promise.all(contexts.map((context) => context.close()));
   }

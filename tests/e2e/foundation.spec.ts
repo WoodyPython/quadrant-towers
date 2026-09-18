@@ -268,6 +268,22 @@ for (const [preset, cells] of [
     try {
       const page = await activePage(pages);
       await expect(page.locator('[data-cell]')).toHaveCount(cells);
+      const board = page.locator('[class*="boardViewport"]');
+      const portraitBoard = await board.evaluate((el) => ({
+        width: el.clientWidth,
+        height: el.clientHeight,
+        scrollWidth: el.scrollWidth,
+        scrollHeight: el.scrollHeight,
+      }));
+      expect(
+        Math.abs(portraitBoard.width - portraitBoard.height),
+      ).toBeLessThanOrEqual(1);
+      expect(portraitBoard.scrollWidth).toBeLessThanOrEqual(
+        portraitBoard.width + 1,
+      );
+      expect(portraitBoard.scrollHeight).toBeLessThanOrEqual(
+        portraitBoard.height + 1,
+      );
       await chooseCard(page);
       await page.getByRole('button', { name: 'Upgrade', exact: true }).tap();
       await page.locator('[data-cell][data-legal="true"]').first().tap();
@@ -299,6 +315,16 @@ for (const [preset, cells] of [
         fullPage: true,
       });
       await page.setViewportSize({ width: 844, height: 390 });
+      await expect
+        .poll(async () => await board.evaluate((el) => el.clientWidth))
+        .toBeGreaterThan(0);
+      const landscapeBoard = await board.evaluate((el) => ({
+        width: el.clientWidth,
+        height: el.clientHeight,
+      }));
+      expect(
+        Math.abs(landscapeBoard.width - landscapeBoard.height),
+      ).toBeLessThanOrEqual(1);
       expect(
         await page.evaluate(
           () => document.documentElement.scrollWidth <= innerWidth,

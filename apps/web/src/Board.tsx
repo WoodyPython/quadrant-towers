@@ -106,6 +106,8 @@ export const Board = memo(function Board({
   onSelect: (p: Point) => void;
 }) {
   const viewport = useRef<HTMLDivElement>(null);
+  const surface = useRef<HTMLDivElement>(null);
+  const grid = useRef<HTMLDivElement>(null);
   const size = view.dimensions.boardSize;
   const ownQuadrant =
     view.players.find((p) => p.id === playerId)?.quadrant ?? 'nw';
@@ -113,12 +115,10 @@ export const Board = memo(function Board({
     x: ownQuadrant.endsWith('e') ? size / 2 : 0,
     y: ownQuadrant.startsWith('s') ? size / 2 : 0,
   };
-  const positioned = useRef(false);
-  const [available, setAvailable] = useState(640);
-  const [zoom, setZoom] = useState(1);
-  const [overview, setOverview] = useState(false);
   const [focused, setFocused] = useState<Point>(ownOrigin);
+  const [zoomUi, setZoomUi] = useState({ cell: 1, fit: 1, max: 3 });
   const dragging = useRef<{
+    pointerId: number;
     x: number;
     y: number;
     left: number;
@@ -128,111 +128,180 @@ export const Board = memo(function Board({
   const touches = useRef(new Map<number, { x: number; y: number }>());
   const pinch = useRef<{
     distance: number;
-    zoom: number;
-    overview: boolean;
-    midX: number;
-    midY: number;
-    scrollLeft: number;
-    scrollTop: number;
+    cell: number;
+    contentX: number;
+    contentY: number;
   } | null>(null);
   const suppressClick = useRef(false);
+  const fitCell = useRef(1);
+  const cellSize = useRef(1);
+  const baseSide = useRef(1);
+  const initialized = useRef(false);
+  const animation = useRef<number | null>(null);
+  const gestureFrame = useRef<number | null>(null);
+  const wheelFrame = useRef<number | null>(null);
+  const pendingGesture = useRef<{
+    cell: number;
+    contentX: number;
+    contentY: number;
+    offsetX: number;
+    offsetY: number;
+  } | null>(null);
+  const wheelFactor = useRef(1);
+  const wheelPoint = useRef({ x: 0, y: 0 });
+  const wheelCommit = useRef<ReturnType<typeof setTimeout> | null>(null);
   const coarse =
     typeof matchMedia !== 'undefined' &&
     matchMedia('(pointer: coarse)').matches;
-  const fitted = Math.max(8, Math.floor((available - 36) / size));
   const minimum = coarse ? 44 : 28;
-  const cellSize = overview ? fitted : Math.max(minimum, fitted) * zoom;
-  const live = useRef({ zoom, overview, minimum, fitted });
-  const zoomScroll = useRef<{ left: number; top: number } | null>(null);
-  useLayoutEffect(() => {
-    live.current = { zoom, overview, minimum, fitted };
+  const limits = useCallback(() => {
+    const fit = fitCell.current;
+    return { fit, max: Math.max(minimum, fit) * 3 };
+  }, [minimum]);
+  const clampZoom = useCallback(
+    (next: number) => {
+      const { fit, max } = limits();
+      return Math.min(max, Math.max(fit, next));
+    },
+    [limits],
+  );
+  const updateSurface = useCallback((next: number) => {
     const el = viewport.current;
-    if (el && zoomScroll.current) {
-      // Apply after the grid resizes, so the old scroll bounds cannot clamp it.
-      el.scrollLeft = zoomScroll.current.left;
-      el.scrollTop = zoomScroll.current.top;
-      zoomScroll.current = null;
-    }
-  });
-  const zoomAt = useCallback(
+    const boardSurface = surface.current;
+    const boardGrid = grid.current;
+    if (!el || !boardSurface || !boardGrid) return;
+    const scale = next / fitCell.current;
+    const side = baseSide.current * scale;
+    boardSurface.style.width = `${side}px`;
+    boardSurface.style.height = `${side}px`;
+    boardGrid.style.transform = `scale(${scale})`;
+    cellSize.current = next;
+  }, []);
+  const zoomToContent = useCallback(
     (
-      next: number,
-      oldCellSize: number,
-      anchorX: number,
-      anchorY: number,
+      nextValue: number,
+      contentX: number,
+      contentY: number,
       offsetX: number,
       offsetY: number,
     ) => {
-      const current = live.current;
-      if (!current.overview && next === current.zoom) return;
-      const ratio =
-        (Math.max(current.minimum, current.fitted) * next) / oldCellSize;
-      // The coordinate axis stays 24px wide at every zoom level.
-      zoomScroll.current = {
-        left: 24 + (anchorX - 24) * ratio - offsetX,
-        top: 24 + (anchorY - 24) * ratio - offsetY,
-      };
-      setOverview(false);
-      setZoom(next);
+      const el = viewport.current;
+      if (!el) return;
+      const next = clampZoom(nextValue);
+      updateSurface(next);
+      const scale = next / fitCell.current;
+      el.scrollLeft = contentX * scale - offsetX;
+      el.scrollTop = contentY * scale - offsetY;
     },
-    [],
+    [clampZoom, updateSurface],
+  );
+  const zoomAt = useCallback(
+    (next: number, offsetX: number, offsetY: number) => {
+      const el = viewport.current;
+      if (!el) return;
+      const scale = cellSize.current / fitCell.current;
+      zoomToContent(
+        next,
+        (el.scrollLeft + offsetX) / scale,
+        (el.scrollTop + offsetY) / scale,
+        offsetX,
+        offsetY,
+      );
+    },
+    [zoomToContent],
+  );
+  const commitZoom = useCallback(() => {
+    const { fit, max } = limits();
+    setZoomUi({ cell: cellSize.current, fit, max });
+  }, [limits]);
+  const flushGesture = useCallback(() => {
+    if (gestureFrame.current !== null) {
+      cancelAnimationFrame(gestureFrame.current);
+      gestureFrame.current = null;
+    }
+    const pending = pendingGesture.current;
+    pendingGesture.current = null;
+    if (pending)
+      zoomToContent(
+        pending.cell,
+        pending.contentX,
+        pending.contentY,
+        pending.offsetX,
+        pending.offsetY,
+      );
+  }, [zoomToContent]);
+  const stopAnimation = useCallback(() => {
+    if (animation.current !== null) cancelAnimationFrame(animation.current);
+    animation.current = null;
+  }, []);
+  const animateZoom = useCallback(
+    (targetValue: number, done?: () => void) => {
+      const el = viewport.current;
+      if (!el) return;
+      stopAnimation();
+      const target = clampZoom(targetValue);
+      const start = cellSize.current;
+      const offsetX = el.clientWidth / 2;
+      const offsetY = el.clientHeight / 2;
+      const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (reduce || Math.abs(target - start) < 0.01) {
+        zoomAt(target, offsetX, offsetY);
+        commitZoom();
+        done?.();
+        return;
+      }
+      const started = performance.now();
+      const tick = (now: number) => {
+        const progress = Math.min(1, (now - started) / 180);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        zoomAt(start + (target - start) * eased, offsetX, offsetY);
+        if (progress < 1) animation.current = requestAnimationFrame(tick);
+        else {
+          animation.current = null;
+          commitZoom();
+          done?.();
+        }
+      };
+      animation.current = requestAnimationFrame(tick);
+    },
+    [clampZoom, commitZoom, stopAnimation, zoomAt],
   );
   useEffect(() => {
     const el = viewport.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) return;
       e.preventDefault();
-      const current = live.current;
-      const base = current.overview ? 1 : current.zoom;
-      const oldCellSize = current.overview
-        ? current.fitted
-        : Math.max(current.minimum, current.fitted) * base;
-      const next = Math.min(
-        3,
-        Math.max(1, base * Math.exp(-e.deltaY * 0.0018)),
-      );
+      stopAnimation();
       const rect = el.getBoundingClientRect();
-      const offsetX = e.clientX - rect.left;
-      const offsetY = e.clientY - rect.top;
-      zoomAt(
-        next,
-        oldCellSize,
-        offsetX + el.scrollLeft,
-        offsetY + el.scrollTop,
-        offsetX,
-        offsetY,
-      );
+      wheelPoint.current = {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top,
+      };
+      const unit =
+        e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientHeight : 1;
+      wheelFactor.current *= Math.exp(-e.deltaY * unit * 0.0018);
+      if (wheelFrame.current === null)
+        wheelFrame.current = requestAnimationFrame(() => {
+          wheelFrame.current = null;
+          const factor = wheelFactor.current;
+          wheelFactor.current = 1;
+          zoomAt(
+            cellSize.current * factor,
+            wheelPoint.current.x,
+            wheelPoint.current.y,
+          );
+        });
+      if (wheelCommit.current) clearTimeout(wheelCommit.current);
+      wheelCommit.current = setTimeout(commitZoom, 120);
     };
     el.addEventListener('wheel', onWheel, { passive: false });
-    return () => el.removeEventListener('wheel', onWheel);
-  }, [zoomAt]);
-  useLayoutEffect(() => {
-    const el = viewport.current;
-    if (positioned.current || !el || available !== el.clientWidth) return;
-    positioned.current = true;
-    if (coarse || size > 16)
-      el.scrollTo(ownOrigin.x * cellSize, ownOrigin.y * cellSize);
-  }, [available, cellSize, coarse, size, ownOrigin.x, ownOrigin.y]);
-  const pick = useCallback(
-    (point: Point) => {
-      if (overview && cellSize < minimum) {
-        setOverview(false);
-        setZoom(1);
-        requestAnimationFrame(() =>
-          viewport.current?.scrollTo({
-            left: Math.max(0, point.x * minimum - available / 2),
-            top: Math.max(
-              0,
-              point.y * minimum - (viewport.current?.clientHeight ?? 300) / 2,
-            ),
-          }),
-        );
-        return;
-      }
-      onSelect(point);
-    },
-    [overview, cellSize, minimum, available, onSelect],
-  );
+    return () => {
+      el.removeEventListener('wheel', onWheel);
+      if (wheelCommit.current) clearTimeout(wheelCommit.current);
+    };
+  }, [commitZoom, stopAnimation, zoomAt]);
+  const pick = useCallback((point: Point) => onSelect(point), [onSelect]);
   const names = useMemo(
     () => new Map(room.players.map((p) => [p.id, p.displayName])),
     [room.players],
@@ -243,27 +312,48 @@ export const Board = memo(function Board({
   const onFocus = useCallback((p: Point) => setFocused(p), []);
   useLayoutEffect(() => {
     const el = viewport.current;
-    if (!el) return;
-    const observer = new ResizeObserver(() => setAvailable(el.clientWidth));
+    const boardGrid = grid.current;
+    if (!el || !boardGrid) return;
+    const measure = () => {
+      const side = Math.min(el.clientWidth, el.clientHeight);
+      if (!side) return;
+      const oldFit = fitCell.current;
+      const oldSide = baseSide.current * (cellSize.current / oldFit);
+      const centerX = oldSide
+        ? (el.scrollLeft + el.clientWidth / 2) / oldSide
+        : 0.5;
+      const centerY = oldSide
+        ? (el.scrollTop + el.clientHeight / 2) / oldSide
+        : 0.5;
+      const wasFit =
+        !initialized.current || Math.abs(cellSize.current - oldFit) < 0.5;
+      const nextFit = Math.max(1, (side - 26) / size);
+      fitCell.current = nextFit;
+      baseSide.current = 26 + size * nextFit;
+      boardGrid.style.setProperty('--cell', `${nextFit}px`);
+      const next = wasFit ? nextFit : clampZoom(cellSize.current);
+      updateSurface(next);
+      el.scrollLeft =
+        centerX * (baseSide.current * (next / nextFit)) - el.clientWidth / 2;
+      el.scrollTop =
+        centerY * (baseSide.current * (next / nextFit)) - el.clientHeight / 2;
+      initialized.current = true;
+      const { max } = limits();
+      setZoomUi({ cell: next, fit: nextFit, max });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
+  }, [clampZoom, limits, size, updateSurface]);
   useEffect(() => {
-    const el = viewport.current;
-    if (!el) return;
-    const start = () => {
-      suppressClick.current = false;
-    };
-    el.addEventListener('touchstart', start, { passive: true });
-    const move = () => {
-      suppressClick.current = true;
-    };
-    el.addEventListener('touchmove', move, { passive: true });
     return () => {
-      el.removeEventListener('touchstart', start);
-      el.removeEventListener('touchmove', move);
+      stopAnimation();
+      if (gestureFrame.current !== null)
+        cancelAnimationFrame(gestureFrame.current);
+      if (wheelFrame.current !== null) cancelAnimationFrame(wheelFrame.current);
     };
-  }, []);
+  }, [stopAnimation]);
   function navigate(event: KeyboardEvent) {
     const movement: Record<string, Point> = {
       ArrowUp: { x: 0, y: -1 },
@@ -276,8 +366,8 @@ export const Board = memo(function Board({
     event.preventDefault();
     if (event.shiftKey) {
       viewport.current?.scrollBy({
-        left: direction.x * cellSize * 3,
-        top: direction.y * cellSize * 3,
+        left: direction.x * cellSize.current * 3,
+        top: direction.y * cellSize.current * 3,
       });
       return;
     }
@@ -296,51 +386,89 @@ export const Board = memo(function Board({
     const q = view.players.find((p) => p.id === playerId)?.quadrant ?? 'nw';
     const x = q.endsWith('e') ? size / 2 : 0;
     const y = q.startsWith('s') ? size / 2 : 0;
-    setOverview(false);
-    setZoom(1);
-    requestAnimationFrame(() =>
-      viewport.current?.scrollTo({
-        left: x * Math.max(minimum, fitted),
-        top: y * Math.max(minimum, fitted),
+    const target = Math.max(minimum, fitCell.current);
+    animateZoom(target, () => {
+      const el = viewport.current;
+      if (!el) return;
+      const scale = target / fitCell.current;
+      const quadrant = size / 2;
+      el.scrollTo({
+        left:
+          (24 + (x + quadrant / 2) * fitCell.current) * scale -
+          el.clientWidth / 2,
+        top:
+          (24 + (y + quadrant / 2) * fitCell.current) * scale -
+          el.clientHeight / 2,
         behavior: 'instant',
-      }),
-    );
+      });
+    });
   }
   return (
     <section className={styles.boardSection} aria-label="Game board">
       <div className={styles.boardTools}>
-        <button
-          onClick={() => {
-            setZoom(1);
-            setOverview(true);
-            viewport.current?.scrollTo(0, 0);
-          }}
-        >
-          Fit board
-        </button>
+        <button onClick={() => animateZoom(fitCell.current)}>Fit board</button>
         <button onClick={myQuadrant}>My quadrant</button>
+        <span className={styles.spacer} />
+        <div
+          className={styles.zoomControls}
+          role="group"
+          aria-label="Board zoom controls"
+        >
+          <button
+            type="button"
+            aria-label="Zoom out"
+            title="Zoom out"
+            disabled={zoomUi.cell <= zoomUi.fit + 0.01}
+            onClick={() => animateZoom(cellSize.current / 1.25)}
+          >
+            <Icon name="minus" size={18} />
+          </button>
+          <button
+            type="button"
+            aria-label="Zoom in"
+            title="Zoom in"
+            disabled={zoomUi.cell >= zoomUi.max - 0.01}
+            onClick={() => animateZoom(cellSize.current * 1.25)}
+          >
+            <Icon name="build" size={18} />
+          </button>
+        </div>
       </div>
       <div
         ref={viewport}
         className={styles.boardViewport}
         onKeyDown={navigate}
         onPointerDown={(e) => {
+          stopAnimation();
           if (e.pointerType === 'touch') {
+            e.currentTarget.setPointerCapture(e.pointerId);
+            if (touches.current.size === 0) suppressClick.current = false;
             touches.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
             if (touches.current.size === 2) {
               suppressClick.current = true;
+              dragging.current = null;
               const [a, b] = [...touches.current.values()] as [
                 { x: number; y: number },
                 { x: number; y: number },
               ];
+              const rect = e.currentTarget.getBoundingClientRect();
+              const offsetX = (a.x + b.x) / 2 - rect.left;
+              const offsetY = (a.y + b.y) / 2 - rect.top;
+              const scale = cellSize.current / fitCell.current;
               pinch.current = {
                 distance: Math.hypot(a.x - b.x, a.y - b.y),
-                zoom: overview ? 1 : zoom,
-                overview,
-                midX: (a.x + b.x) / 2,
-                midY: (a.y + b.y) / 2,
-                scrollLeft: e.currentTarget.scrollLeft,
-                scrollTop: e.currentTarget.scrollTop,
+                cell: cellSize.current,
+                contentX: (e.currentTarget.scrollLeft + offsetX) / scale,
+                contentY: (e.currentTarget.scrollTop + offsetY) / scale,
+              };
+            } else {
+              dragging.current = {
+                pointerId: e.pointerId,
+                x: e.clientX,
+                y: e.clientY,
+                left: e.currentTarget.scrollLeft,
+                top: e.currentTarget.scrollTop,
+                moved: false,
               };
             }
             return;
@@ -348,6 +476,7 @@ export const Board = memo(function Board({
           if (e.pointerType !== 'mouse' || e.button !== 0) return;
           suppressClick.current = false;
           dragging.current = {
+            pointerId: e.pointerId,
             x: e.clientX,
             y: e.clientY,
             left: e.currentTarget.scrollLeft,
@@ -367,29 +496,45 @@ export const Board = memo(function Board({
                 { x: number; y: number },
               ];
               const distance = Math.hypot(a.x - b.x, a.y - b.y);
-              const next = Math.min(
-                3,
-                Math.max(1, p.zoom * (distance / p.distance)),
-              );
-              const oldCellSize = p.overview
-                ? fitted
-                : Math.max(minimum, fitted) * p.zoom;
               const rect = e.currentTarget.getBoundingClientRect();
-              const offsetX = p.midX - rect.left;
-              const offsetY = p.midY - rect.top;
-              zoomAt(
-                next,
-                oldCellSize,
-                offsetX + p.scrollLeft,
-                offsetY + p.scrollTop,
-                offsetX,
-                offsetY,
-              );
+              pendingGesture.current = {
+                cell: p.cell * (distance / p.distance),
+                contentX: p.contentX,
+                contentY: p.contentY,
+                offsetX: (a.x + b.x) / 2 - rect.left,
+                offsetY: (a.y + b.y) / 2 - rect.top,
+              };
+              if (gestureFrame.current === null)
+                gestureFrame.current = requestAnimationFrame(() => {
+                  gestureFrame.current = null;
+                  const pending = pendingGesture.current;
+                  if (pending)
+                    zoomToContent(
+                      pending.cell,
+                      pending.contentX,
+                      pending.contentY,
+                      pending.offsetX,
+                      pending.offsetY,
+                    );
+                });
+            } else if (touches.current.size === 1) {
+              const d = dragging.current;
+              if (!d || d.pointerId !== e.pointerId) return;
+              const dx = e.clientX - d.x;
+              const dy = e.clientY - d.y;
+              if (Math.hypot(dx, dy) > 7) {
+                d.moved = true;
+                suppressClick.current = true;
+              }
+              if (d.moved) {
+                e.currentTarget.scrollLeft = d.left - dx;
+                e.currentTarget.scrollTop = d.top - dy;
+              }
             }
             return;
           }
           const d = dragging.current;
-          if (!d) return;
+          if (!d || d.pointerId !== e.pointerId) return;
           const dx = e.clientX - d.x,
             dy = e.clientY - d.y;
           if (Math.hypot(dx, dy) > 7) {
@@ -405,7 +550,22 @@ export const Board = memo(function Board({
         onPointerUp={(e) => {
           if (e.pointerType === 'touch') {
             touches.current.delete(e.pointerId);
-            if (touches.current.size < 2) pinch.current = null;
+            if (touches.current.size < 2) {
+              pinch.current = null;
+              flushGesture();
+              commitZoom();
+              const remaining = [...touches.current.entries()][0];
+              dragging.current = remaining
+                ? {
+                    pointerId: remaining[0],
+                    x: remaining[1].x,
+                    y: remaining[1].y,
+                    left: e.currentTarget.scrollLeft,
+                    top: e.currentTarget.scrollTop,
+                    moved: true,
+                  }
+                : null;
+            }
             return;
           }
           dragging.current = null;
@@ -413,7 +573,12 @@ export const Board = memo(function Board({
         onPointerCancel={(e) => {
           if (e.pointerType === 'touch') {
             touches.current.delete(e.pointerId);
-            if (touches.current.size < 2) pinch.current = null;
+            if (touches.current.size < 2) {
+              pinch.current = null;
+              dragging.current = null;
+              flushGesture();
+              commitZoom();
+            }
             return;
           }
           dragging.current = null;
@@ -426,93 +591,95 @@ export const Board = memo(function Board({
           }
         }}
       >
-        <div
-          className={styles.boardGrid}
-          style={
-            {
-              '--cell': `${cellSize}px`,
-              '--size': size,
-              '--quadrant': size / 2,
-            } as CSSProperties
-          }
-        >
-          <span />
-          {Array.from({ length: size }, (_, x) => (
-            <span key={x} className={styles.axis}>
-              {coordinate({ x, y: 0 }).replace('1', '')}
-            </span>
-          ))}
-          {Array.from({ length: size }, (_, y) => (
-            <div className={styles.boardRow} key={y}>
-              <span className={styles.axis}>{y + 1}</span>
-              {view.cells.slice(y * size, (y + 1) * size).map((c) => {
-                const tower = c.visibility === 'visible' ? c.tower : null;
-                const joined = tower
-                  ? (
-                      [
-                        ['top', 0, -1],
-                        ['right', 1, 0],
-                        ['bottom', 0, 1],
-                        ['left', -1, 0],
-                      ] as const
-                    )
-                      .filter(([, dx, dy]) => {
-                        const x = c.cell.x + dx,
-                          y = c.cell.y + dy;
-                        if (x < 0 || x >= size || y < 0 || y >= size)
-                          return false;
-                        const neighbor = view.cells[y * size + x];
-                        return (
-                          neighbor?.visibility === 'visible' &&
-                          neighbor.tower?.id === tower.id
-                        );
-                      })
-                      .map(([side]) => side)
-                      .join(' ')
-                  : '';
-                const q = quadrant(c.cell, size / 2);
-                const p = view.players.find((p) => p.quadrant === q);
-                const unavailable = !isAvailable(view, c.cell);
-                const owner =
-                  room.players.find((p2) => p2.id === p?.id)?.seat ?? 0;
-                return (
-                  <BoardCell
-                    key={key(c.cell)}
-                    x={c.cell.x}
-                    y={c.cell.y}
-                    label={
-                      unavailable
-                        ? `${coordinate(c.cell)}, unavailable region`
-                        : cellLabel(c, names)
-                    }
-                    fog={c.visibility === 'hidden'}
-                    health={tower?.health ?? 0}
-                    hall={tower?.type === 'town_hall'}
-                    owner={owner}
-                    edge={`${c.cell.x === size / 2 ? 'left ' : ''}${c.cell.y === size / 2 ? 'top' : ''}`}
-                    joined={joined}
-                    legal={legal.has(key(c.cell))}
-                    selected={
-                      preview.has(key(c.cell)) ||
-                      (!!selected && key(selected) === key(c.cell))
-                    }
-                    focused={key(focused) === key(c.cell)}
-                    unavailable={unavailable}
-                    onSelect={pick}
-                    onFocus={onFocus}
-                  />
-                );
-              })}
-            </div>
-          ))}
-          {closedQuadrants.map((quadrant) => (
-            <span
-              key={quadrant}
-              className={styles.closedQuadrant}
-              data-quadrant={quadrant}
-              aria-hidden="true"
-            />
-          ))}
+        <div ref={surface} className={styles.boardSurface}>
+          <div
+            ref={grid}
+            className={styles.boardGrid}
+            style={
+              {
+                '--size': size,
+                '--quadrant': size / 2,
+              } as CSSProperties
+            }
+          >
+            <span />
+            {Array.from({ length: size }, (_, x) => (
+              <span key={x} className={styles.axis}>
+                {coordinate({ x, y: 0 }).replace('1', '')}
+              </span>
+            ))}
+            {Array.from({ length: size }, (_, y) => (
+              <div className={styles.boardRow} key={y}>
+                <span className={styles.axis}>{y + 1}</span>
+                {view.cells.slice(y * size, (y + 1) * size).map((c) => {
+                  const tower = c.visibility === 'visible' ? c.tower : null;
+                  const joined = tower
+                    ? (
+                        [
+                          ['top', 0, -1],
+                          ['right', 1, 0],
+                          ['bottom', 0, 1],
+                          ['left', -1, 0],
+                        ] as const
+                      )
+                        .filter(([, dx, dy]) => {
+                          const x = c.cell.x + dx,
+                            y = c.cell.y + dy;
+                          if (x < 0 || x >= size || y < 0 || y >= size)
+                            return false;
+                          const neighbor = view.cells[y * size + x];
+                          return (
+                            neighbor?.visibility === 'visible' &&
+                            neighbor.tower?.id === tower.id
+                          );
+                        })
+                        .map(([side]) => side)
+                        .join(' ')
+                    : '';
+                  const q = quadrant(c.cell, size / 2);
+                  const p = view.players.find((p) => p.quadrant === q);
+                  const unavailable = !isAvailable(view, c.cell);
+                  const owner =
+                    room.players.find((p2) => p2.id === p?.id)?.seat ?? 0;
+                  return (
+                    <BoardCell
+                      key={key(c.cell)}
+                      x={c.cell.x}
+                      y={c.cell.y}
+                      label={
+                        unavailable
+                          ? `${coordinate(c.cell)}, unavailable region`
+                          : cellLabel(c, names)
+                      }
+                      fog={c.visibility === 'hidden'}
+                      health={tower?.health ?? 0}
+                      hall={tower?.type === 'town_hall'}
+                      owner={owner}
+                      edge={`${c.cell.x === size / 2 ? 'left ' : ''}${c.cell.y === size / 2 ? 'top' : ''}`}
+                      joined={joined}
+                      legal={legal.has(key(c.cell))}
+                      selected={
+                        preview.has(key(c.cell)) ||
+                        (!!selected && key(selected) === key(c.cell))
+                      }
+                      focused={key(focused) === key(c.cell)}
+                      unavailable={unavailable}
+                      onSelect={pick}
+                      onFocus={onFocus}
+                    />
+                  );
+                })}
+              </div>
+            ))}
+            {closedQuadrants.map((quadrant) => (
+              <span
+                key={quadrant}
+                className={styles.closedQuadrant}
+                data-quadrant={quadrant}
+                aria-hidden="true"
+              />
+            ))}
+          </div>
         </div>
       </div>
     </section>

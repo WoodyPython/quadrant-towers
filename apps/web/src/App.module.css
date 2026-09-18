@@ -466,24 +466,42 @@
 .spacer {
   flex: 1;
 }
+.zoomControls {
+  display: flex;
+  gap: 4px;
+}
+.zoomControls button {
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  padding: 0;
+}
 .boardViewport {
+  width: 100%;
+  aspect-ratio: 1;
   overflow: auto;
-  max-height: calc(100svh - 295px);
-  min-height: 220px;
   overscroll-behavior: contain;
-  touch-action: pan-x pan-y;
+  touch-action: none;
   scrollbar-width: thin;
   scrollbar-color: #9ca591 transparent;
   user-select: none;
 }
-.boardGrid {
+.boardSurface {
   position: relative;
+  min-width: 100%;
+  min-height: 100%;
+}
+.boardGrid {
+  position: absolute;
+  inset: 0 auto auto 0;
   display: grid;
   grid-template-columns: 24px repeat(var(--size), var(--cell));
   grid-template-rows: 24px repeat(var(--size), var(--cell));
   width: max-content;
   padding-right: 2px;
   padding-bottom: 2px;
+  transform-origin: top left;
+  will-change: transform;
 }
 .closedQuadrant {
   position: absolute;
@@ -541,7 +559,7 @@
   border: 1px solid #ffffff80;
   background: var(--tile);
   color: var(--player);
-  touch-action: pan-x pan-y;
+  touch-action: none;
 }
 .cell[data-edge~='left'] {
   border-left: 3px solid #59644e;
@@ -992,11 +1010,6 @@
     transform: translateY(0) scale(1);
   }
 }
-@media (min-width: 1500px) {
-  .boardViewport {
-    max-height: 760px;
-  }
-}
 @media (max-width: 1000px) {
   .home {
     gap: 32px;
@@ -1088,10 +1101,6 @@
   .turnName {
     max-width: 45%;
   }
-  .boardViewport {
-    max-height: 48svh;
-    min-height: 180px;
-  }
   .boardSection {
     padding: 6px;
     border-radius: 10px;
@@ -1155,9 +1164,6 @@
   .gameLayout {
     grid-template-columns: minmax(0, 1fr) 260px;
     gap: 16px;
-  }
-  .boardViewport {
-    max-height: 65svh;
   }
   .header {
     padding-top: 4px;

@@ -125,9 +125,10 @@ function Help({ close }: { close: () => void }) {
         </p>
         <h3>Board controls</h3>
         <p>
-          Drag to pan. Scroll or pinch to zoom, or use My quadrant to return
-          home. Arrow keys move between cells; Shift + arrows pan. Enter
-          selects, Escape cancels.
+          Drag with one finger to pan and pinch with two fingers to zoom. You
+          can also scroll or use the − and + buttons. Fit board shows the whole
+          board; My quadrant returns to your territory. Arrow keys move between
+          cells; Shift + arrows pan. Enter selects, Escape cancels.
         </p>
         <h3>Install on your phone</h3>
         <p>
