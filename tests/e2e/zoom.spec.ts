@@ -47,43 +47,52 @@ test('wheel zoom preserves the cell under the cursor from a fitted board', async
     expect(fitted.scrollWidth).toBeLessThanOrEqual(fitted.width + 1);
     expect(fitted.scrollHeight).toBeLessThanOrEqual(fitted.height + 1);
     const bounds = (await viewport.boundingBox())!;
-    const offset = { x: bounds.width / 2, y: bounds.height / 2 };
-    const before = await anchor(viewport, offset);
+    const center = { x: bounds.width / 2, y: bounds.height / 2 };
+    const before = await anchor(viewport, center);
 
     await zoomIn.click();
     await expect
-      .poll(async () => (await anchor(viewport, offset)).size)
+      .poll(async () => (await anchor(viewport, center)).size)
       .toBeGreaterThan(before.size);
-    const buttonZoom = await anchor(viewport, offset);
+    const buttonZoom = await anchor(viewport, center);
     expect(buttonZoom.x).toBeCloseTo(before.x, 1);
     expect(buttonZoom.y).toBeCloseTo(before.y, 1);
     await expect(zoomOut).toBeEnabled();
 
     await zoomOut.click();
     await expect
-      .poll(async () => (await anchor(viewport, offset)).size)
+      .poll(async () => (await anchor(viewport, center)).size)
       .toBeCloseTo(before.size, 1);
     await expect(zoomOut).toBeDisabled();
 
-    await page.mouse.move(bounds.x + offset.x, bounds.y + offset.y);
+    const windowHeight = await page.evaluate(() => innerHeight);
+    const visibleTop = Math.max(0, bounds.y);
+    const visibleBottom = Math.min(windowHeight, bounds.y + bounds.height);
+    expect(visibleBottom - visibleTop).toBeGreaterThan(40);
+    const wheelOffset = {
+      x: bounds.width / 2,
+      y: (visibleTop + visibleBottom) / 2 - bounds.y,
+    };
+    const beforeWheel = await anchor(viewport, wheelOffset);
+    await page.mouse.move(bounds.x + wheelOffset.x, bounds.y + wheelOffset.y);
     await page.mouse.wheel(0, -300);
     await expect
-      .poll(async () => (await anchor(viewport, offset)).size)
-      .toBeGreaterThan(before.size);
-    const after = await anchor(viewport, offset);
-    expect(after.x).toBeCloseTo(before.x, 1);
-    expect(after.y).toBeCloseTo(before.y, 1);
+      .poll(async () => (await anchor(viewport, wheelOffset)).size)
+      .toBeGreaterThan(beforeWheel.size);
+    const after = await anchor(viewport, wheelOffset);
+    expect(after.x).toBeCloseTo(beforeWheel.x, 1);
+    expect(after.y).toBeCloseTo(beforeWheel.y, 1);
     await page.mouse.wheel(0, 150);
     await expect
-      .poll(async () => (await anchor(viewport, offset)).size)
+      .poll(async () => (await anchor(viewport, wheelOffset)).size)
       .toBeLessThan(after.size);
-    const smaller = await anchor(viewport, offset);
-    expect(smaller.x).toBeCloseTo(before.x, 1);
-    expect(smaller.y).toBeCloseTo(before.y, 1);
+    const smaller = await anchor(viewport, wheelOffset);
+    expect(smaller.x).toBeCloseTo(beforeWheel.x, 1);
+    expect(smaller.y).toBeCloseTo(beforeWheel.y, 1);
 
     await page.getByRole('button', { name: 'Fit board' }).click();
     await expect
-      .poll(async () => (await anchor(viewport, offset)).size)
+      .poll(async () => (await anchor(viewport, center)).size)
       .toBeCloseTo(before.size, 1);
     const reset = await boardGeometry(viewport);
     expect(reset.scrollWidth).toBeLessThanOrEqual(reset.width + 1);
